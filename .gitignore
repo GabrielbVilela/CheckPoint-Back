@@ -1,0 +1,26 @@
+# IMPORTANTE:
+# NUNCA envie este arquivo para o repositório. Contém segredos como senhas e chaves de API.
+.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Virtual Environments
+# A pasta do ambiente virtual não deve ir para o repositório.
+venv/
+env/
+.venv/
+
+# IDE / Editor directories
+# Configurações específicas do seu editor de código.
+.vscode/
+.idea/
+
+# OS-generated files
+# Arquivos gerados pelo sistema operacional que não são parte do projeto.
+.DS_Store
+Thumbs.db
