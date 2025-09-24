@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from typing import Literal, Optional
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 
 class TipoUsuario(str, Enum):
@@ -54,5 +54,24 @@ class ContratoOut(ContratoCreate):
     aluno: Optional[UsuarioOut]
     professor: Optional[UsuarioOut]
     endereco: Optional[EnderecoOut]
+    class Config:
+        from_attributes = True
+
+# ADICIONE AS CLASSES ABAIXO
+
+class PontoCheckLocation(BaseModel):
+    id_aluno: int
+    latitude_atual: float
+    longitude_atual: float
+
+class PontoOut(BaseModel):
+    id: int
+    id_contrato: int
+    data: date
+    hora_entrada: datetime
+    hora_saida: Optional[datetime] = None
+    tempo_trabalhado_minutos: Optional[int] = None
+    ativo: bool
+
     class Config:
         from_attributes = True
