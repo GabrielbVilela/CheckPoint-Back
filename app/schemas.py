@@ -75,3 +75,10 @@ class PontoOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    matricula: Optional[str] = None
