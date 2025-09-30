@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from typing import Optional, List
+from datetime import timedelta
 
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 # --- Imports do projeto ---
-from app import crud, schemas, models
+from app import crud, schemas, models, auth
 from app.database import SessionLocal, engine 
 
 # --- Lifespan da Aplicação ---
@@ -29,11 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Schema para Login ---
-class UsuarioLogin(BaseModel):
-    matricula: str
-    senha: str
-
 # --- Dependência de sessão do Banco ---
 def get_db():
     db = SessionLocal()
@@ -51,16 +47,26 @@ def register(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Matrícula já cadastrada")
     return crud.create_usuario(db=db, usuario=usuario)
 
-@app.post("/login", response_model=schemas.UsuarioOut)
-def login(usuario: UsuarioLogin, db: Session = Depends(get_db)):
-    db_user = crud.get_usuario_by_matricula(db, matricula=usuario.matricula)
-    if not db_user or not crud.verify_password(usuario.senha, db_user.senha_hash):
+@app.post("/login", response_model=schemas.Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    db_user = crud.get_usuario_by_matricula(db, matricula=form_data.username)
+    if not db_user or not auth.verify_password(form_data.password, db_user.senha_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Matrícula ou senha inválida",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return db_user
+    
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": db_user.matricula}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/me", response_model=schemas.UsuarioOut)
+async def read_users_me(current_user: models.Usuario = Depends(auth.get_current_user)):
+    """Retorna os dados do usuário logado."""
+    return current_user
 
 @app.get("/usuarios", response_model=List[schemas.UsuarioOut])
 def listar_usuarios(
@@ -68,6 +74,7 @@ def listar_usuarios(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(auth.get_current_professor)
 ):
     return crud.list_usuarios(db, tipo=tipo, skip=skip, limit=limit)
 
@@ -99,7 +106,10 @@ def read_contrato(contrato_id: int, db: Session = Depends(get_db)):
 # =============================================================================
 
 @app.post("/ponto/entrada", response_model=schemas.PontoOut, status_code=status.HTTP_201_CREATED, tags=["Ponto Eletrônico"])
-def registrar_ponto_entrada(location_data: schemas.PontoCheckLocation, db: Session = Depends(get_db)):
+def registrar_ponto_entrada(
+    location_data: schemas.PontoCheckLocation, 
+    db: Session = Depends(get_db)):
+    current_user: models.Usuario = Depends(auth.get_current_user)
     """
     Registra a entrada de um aluno no ponto eletrônico.
 
@@ -109,7 +119,8 @@ def registrar_ponto_entrada(location_data: schemas.PontoCheckLocation, db: Sessi
     return crud.registrar_entrada(db=db, location_data=location_data)
 
 @app.patch("/ponto/saida/{id_aluno}", response_model=schemas.PontoOut, tags=["Ponto Eletrônico"])
-def registrar_ponto_saida(id_aluno: int, db: Session = Depends(get_db)):
+def registrar_ponto_saida(id_aluno: int, 
+    db: Session = Depends(get_db)):
     """
     Registra a saída de um aluno no ponto eletrônico.
 
