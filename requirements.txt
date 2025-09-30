@@ -8,3 +8,4 @@ pydantic
 python-dotenv
 pydantic[email]
 requests
+python-jose[cryptography]
