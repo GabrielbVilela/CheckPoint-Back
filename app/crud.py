@@ -1,11 +1,9 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException 
-from . import models, schemas, utils
-from passlib.context import CryptContext
+from . import models, schemas, utils, auth
 from datetime import datetime, timezone
 from app import services
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ... (suas funções de usuário, endereço e contrato existentes) ...
 def get_usuario_by_email(db: Session, email: str):
@@ -15,7 +13,7 @@ def get_usuario_by_matricula(db: Session, matricula: str):
     return db.query(models.Usuario).filter(models.Usuario.matricula == matricula).first()
 
 def create_usuario(db: Session, usuario: schemas.UsuarioCreate):
-    hashed_password = pwd_context.hash(usuario.senha)
+    hashed_password = auth.get_password_hash(usuario.senha)
     db_usuario = models.Usuario(
         nome=usuario.nome,
         matricula=usuario.matricula,
@@ -29,9 +27,6 @@ def create_usuario(db: Session, usuario: schemas.UsuarioCreate):
     db.commit()
     db.refresh(db_usuario)
     return db_usuario
-
-def verify_password(plain_password: str, hashed_password: str):
-    return pwd_context.verify(plain_password, hashed_password)
 
 def list_usuarios(db: Session, tipo: str = None, skip: int = 0, limit: int = 100):
     query = db.query(models.Usuario)
