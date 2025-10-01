@@ -12,6 +12,9 @@ def get_usuario_by_email(db: Session, email: str):
 def get_usuario_by_matricula(db: Session, matricula: str):
     return db.query(models.Usuario).filter(models.Usuario.matricula == matricula).first()
 
+def get_usuario_by_contato(db: Session, contato: str):
+    return db.query(models.Usuario).filter(models.Usuario.contato == contato).first()
+
 def create_usuario(db: Session, usuario: schemas.UsuarioCreate):
     hashed_password = auth.get_password_hash(usuario.senha)
     db_usuario = models.Usuario(

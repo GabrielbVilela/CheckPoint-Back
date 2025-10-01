@@ -1,20 +1,16 @@
-version: "3.9"
-
 services:
   postgres_db:
     image: postgres:15
     container_name: postgres_db_v2
     restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: estagio_db
+    env_file:
+      - .env  # <-- Lê as variáveis daqui
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       retries: 5
       start_period: 10s
@@ -30,12 +26,8 @@ services:
     depends_on:
       postgres_db:
         condition: service_healthy
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: estagio_db
-      POSTGRES_HOST: postgres_db
-      POSTGRES_PORT: 5432
+    env_file:
+      - .env  # <-- Também lê as variáveis daqui
 
 volumes:
   postgres_data:

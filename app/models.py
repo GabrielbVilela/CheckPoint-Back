@@ -7,6 +7,8 @@ from datetime import date
 class TipoUsuario(str, enum.Enum):
     aluno = "aluno"
     professor = "professor"
+    admin = "admin" 
+    coordenador = "coordenador"
 
 class Usuario(Base):
     __tablename__ = "usuarios"

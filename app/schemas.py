@@ -6,6 +6,8 @@ from enum import Enum
 class TipoUsuario(str, Enum):
     aluno = "aluno"
     professor = "professor"
+    admin = "admin" 
+    coordenador = "coordenador" 
 
 class UsuarioCreate(BaseModel):
     nome: str
@@ -14,7 +16,7 @@ class UsuarioCreate(BaseModel):
     contato: str
     email: EmailStr
     turma: str
-    tipo_acesso: Literal["aluno", "professor"] = "aluno"
+    tipo_acesso: Literal["aluno", "professor", "admin", "coordenador"] = "aluno"
 
 class UsuarioOut(BaseModel):
     nome: str
