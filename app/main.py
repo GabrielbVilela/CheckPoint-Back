@@ -9,15 +9,14 @@ from sqlalchemy.orm import Session
 
 # --- Imports do projeto ---
 from app import crud, schemas, models, auth
-from app.database import SessionLocal, engine
+from app.database import SessionLocal
 from app.models import TipoUsuario
 
 # --- Lifespan da Aplicação ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Cria as tabelas no banco de dados ao iniciar a aplicação."""
-    print("INFO: Iniciando aplicação e criando tabelas do banco de dados...")
-    models.Base.metadata.create_all(bind=engine)
+    """Inicialização da aplicação."""
+    print("INFO: Iniciando aplicação...")
     yield
     print("INFO: Encerrando aplicação.")
 
@@ -26,7 +25,7 @@ app = FastAPI(lifespan=lifespan, title="API de Gestão de Estágios", version="1
 # --- Configuração do CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, restrinja para o domínio do seu front-end
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,16 +41,18 @@ def get_db():
         db.close()
 
 # =============================================================================
+# Endpoints de saúde
+# =============================================================================
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
+
+# =============================================================================
 # Endpoints de Autenticação e Utilizadores
 # =============================================================================
 
 @app.post("/login", response_model=schemas.Token, tags=["Autenticação"])
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Autentica um utilizador e retorna um token de acesso JWT.
-    
-    Use a `matrícula` como **username** e a `senha` como **password**.
-    """
     user = auth.authenticate_user(db, matricula=form_data.username, password=form_data.password)
     if not user:
         raise HTTPException(
@@ -68,7 +69,6 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 @app.get("/me", response_model=schemas.UsuarioOut, tags=["Utilizadores"])
 async def read_users_me(current_user: models.Usuario = Depends(auth.get_current_active_user)):
-    """Retorna os dados do utilizador atualmente logado."""
     return current_user
 
 # =============================================================================

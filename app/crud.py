@@ -10,7 +10,11 @@ def get_usuario_by_email(db: Session, email: str):
     return db.query(models.Usuario).filter(models.Usuario.email == email).first()
 
 def get_usuario_by_matricula(db: Session, matricula: str):
-    return db.query(models.Usuario).filter(models.Usuario.matricula == matricula).first()
+    return (
+        db.query(models.Usuario)
+        .filter(models.Usuario.matricula == str(matricula))
+        .first()
+    )
 
 def get_usuario_by_contato(db: Session, contato: str):
     return db.query(models.Usuario).filter(models.Usuario.contato == contato).first()
