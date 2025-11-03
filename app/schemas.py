@@ -128,6 +128,11 @@ class PontoOut(BaseModel):
         from_attributes = True
 
 
+class PontoToggleOut(BaseModel):
+    acao: Literal["aberto", "fechado"]
+    ponto: PontoOut
+
+
 # ------------------------------------------------------------
 # Auth
 # ------------------------------------------------------------
@@ -138,3 +143,4 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     matricula: Optional[str] = None
+    uid: Optional[int] = None

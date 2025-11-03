@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, List, Union
 from datetime import timedelta
 
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -10,17 +10,15 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 # --- Imports locais ---
-import crud
-import schemas
-import models
-import auth
-from database import (
-    SessionLocal,
+from . import crud, schemas, models, auth
+from .database import (
     engine,
     ensure_enderecos_columns,
     ensure_contratos_columns_and_boolean_status,
+    get_db,
 )
-from models import Base, TipoUsuario
+from .models import Base
+from .schemas import TipoUsuario
 
 # -----------------------------------------------------------------------------
 # Lifespan da Aplicação
@@ -60,15 +58,9 @@ app.add_middleware(
 )
 
 # -----------------------------------------------------------------------------
-# Dependência de sessão do Banco
+# Dependencia de sessao do Banco
 # -----------------------------------------------------------------------------
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+# A dependencia get_db e importada de app.database para evitar duplicidade.
 # -----------------------------------------------------------------------------
 # Health
 # -----------------------------------------------------------------------------
@@ -93,8 +85,14 @@ def login_for_access_token(
         )
 
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_payload = {
+        "sub": str(user.id),
+        "uid": user.id,
+        "matricula": user.matricula,
+        "scope": user.tipo_acesso,
+    }
     access_token = auth.create_access_token(
-        data={"sub": user.matricula, "uid": user.id, "scope": user.tipo_acesso},
+        data=access_token_payload,
         expires_delta=access_token_expires,
     )
     return {"access_token": access_token, "token_type": "bearer"}
@@ -208,13 +206,14 @@ def read_contratos(
 # -----------------------------------------------------------------------------
 @app.post(
     "/ponto/entrada",
-    response_model=schemas.PontoOut,
-    status_code=status.HTTP_201_CREATED,
+    response_model=schemas.PontoToggleOut,
+    status_code=status.HTTP_200_OK,
     tags=["Ponto Eletrônico"],
 )
 def registrar_ponto_entrada(
     # Aceita tanto só coords quanto coords+id_aluno (legado)
     location_data: Union[schemas.PontoLocalizacaoIn, schemas.PontoCheckLocation],
+    response: Response,
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(auth.get_current_active_aluno),
 ):
@@ -225,7 +224,16 @@ def registrar_ponto_entrada(
             latitude_atual=location_data.latitude_atual,
             longitude_atual=location_data.longitude_atual,
         )
-        return crud.ponto_entrada(db=db, matricula=current_user.matricula, payload=ponto_check_data)
+        ponto, finalizou = crud.ponto_entrada(
+            db=db,
+            matricula=current_user.matricula,
+            payload=ponto_check_data,
+        )
+        ponto_out = schemas.PontoOut.model_validate(ponto)
+        acao = "fechado" if finalizou else "aberto"
+        if response is not None:
+            response.status_code = status.HTTP_200_OK if finalizou else status.HTTP_201_CREATED
+        return schemas.PontoToggleOut(acao=acao, ponto=ponto_out)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
@@ -244,7 +252,12 @@ def registrar_ponto_saida(
         return crud.ponto_saida(db=db, matricula=current_user.matricula)
     except ValueError as ve:
         detail = str(ve)
-        if "não há ponto aberto" in detail.lower() or "nenhum ponto aberto" in detail.lower():
+        lowered = detail.lower()
+        if (
+            "não há ponto aberto" in lowered
+            or "nenhum ponto aberto" in lowered
+            or "nenhum ponto em aberto" in lowered
+        ):
             raise HTTPException(status_code=404, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
     except Exception as e:

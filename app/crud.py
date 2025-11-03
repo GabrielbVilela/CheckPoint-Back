@@ -1,11 +1,11 @@
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import date, datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func, cast, String
 
-from models import Usuario, Endereco, Contrato, Ponto
-from schemas import UsuarioCreate, EnderecoCreate, ContratoCreate, PontoCheckLocation
-from utils import ensure_aware
+from .models import Usuario, Endereco, Contrato, Ponto
+from .schemas import UsuarioCreate, EnderecoCreate, ContratoCreate, PontoCheckLocation
+from .utils import ensure_aware
 
 # --------------------------------------------------------------------------
 # CRUD: Usuários
@@ -69,22 +69,12 @@ def get_endereco_by_id(db: Session, eid: int) -> Optional[Endereco]:
     return db.query(Endereco).filter(Endereco.id == eid).first()
 
 def get_contrato_ativo_do_aluno(db: Session, id_aluno: int) -> Optional[Contrato]:
-    # Compat: boolean OR strings legadas
+    # Converte status para string comparável, aceitando legados e booleanos
+    status_norm = func.lower(cast(Contrato.status, String))
     return (
         db.query(Contrato)
-        .filter(
-            and_(
-                Contrato.id_aluno == id_aluno,
-                or_(
-                    Contrato.status.is_(True),               # booleano certo
-                    getattr(Contrato, "status") == "Ativo",  # legados
-                    getattr(Contrato, "status") == "TRUE",
-                    getattr(Contrato, "status") == "True",
-                    getattr(Contrato, "status") == "true",
-                    getattr(Contrato, "status") == "1",
-                ),
-            )
-        )
+        .filter(Contrato.id_aluno == id_aluno)
+        .filter(status_norm.in_(["true", "1", "ativo"]))
         .first()
     )
 
@@ -114,63 +104,59 @@ def get_contratos(db: Session) -> List[Contrato]:
 # --------------------------------------------------------------------------
 # CRUD: Ponto Eletrônico
 # --------------------------------------------------------------------------
-def ponto_entrada(db: Session, matricula: str, payload: PontoCheckLocation) -> Ponto:
+def _finalizar_ponto(db: Session, ponto: Ponto) -> Ponto:
+    """
+    Finaliza um ponto aberto calculando o tempo trabalhado e desativando-o.
+    """
+    ponto.hora_saida = datetime.utcnow()
+    he = ensure_aware(ponto.hora_entrada)
+    hs = ensure_aware(ponto.hora_saida)
+    if he and hs:
+        delta = hs - he
+        ponto.tempo_trabalhado_minutos = int(delta.total_seconds() // 60)
+    ponto.ativo = False
+
+    db.commit()
+    db.refresh(ponto)
+    return ponto
+
+
+def ponto_entrada(db: Session, matricula: str, payload: PontoCheckLocation) -> Tuple[Ponto, bool]:
     user = get_usuario_by_matricula(db, matricula)
     if not user:
         raise ValueError("Usuário não encontrado.")
 
-    contrato = get_contrato_ativo_do_aluno(db, payload.id_aluno)
+    ponto_aberto = get_ponto_aberto(db, user.id)
+    if ponto_aberto:
+        return _finalizar_ponto(db, ponto_aberto), True
+
+    contrato = get_contrato_ativo_do_aluno(db, user.id)
     if not contrato:
         raise ValueError("Nenhum contrato ativo para este aluno.")
 
-    # Impede ponto duplicado aberto para o contrato
-    ponto_aberto = (
-        db.query(Ponto)
-        .filter(and_(Ponto.id_contrato == contrato.id, Ponto.ativo.is_(True)))
-        .first()
-    )
-    if ponto_aberto:
-        raise ValueError("Já existe um ponto em aberto para este aluno.")
-
     agora = datetime.utcnow()
-    p = Ponto(
+    ponto = Ponto(
         id_contrato=contrato.id,
         data=date.today(),
         hora_entrada=agora,
         ativo=True,
     )
-    db.add(p)
+    db.add(ponto)
     db.commit()
-    db.refresh(p)
-    return p
+    db.refresh(ponto)
+    return ponto, False
+
 
 def ponto_saida(db: Session, matricula: str) -> Ponto:
     user = get_usuario_by_matricula(db, matricula)
     if not user:
         raise ValueError("Usuário não encontrado.")
 
-    # Busca ponto em aberto (ativo) pelo contrato do aluno
-    p = (
-        db.query(Ponto)
-        .join(Contrato, Contrato.id == Ponto.id_contrato)
-        .filter(and_(Contrato.id_aluno == user.id, Ponto.ativo.is_(True)))
-        .first()
-    )
-    if not p:
+    ponto_aberto = get_ponto_aberto(db, user.id)
+    if not ponto_aberto:
         raise ValueError("Nenhum ponto em aberto encontrado para este aluno.")
 
-    p.hora_saida = datetime.utcnow()
-    # Garante timezone-aware para cálculo seguro
-    he = ensure_aware(p.hora_entrada)
-    hs = ensure_aware(p.hora_saida)
-    if he and hs:
-        delta = hs - he
-        p.tempo_trabalhado_minutos = int(delta.total_seconds() // 60)
-    p.ativo = False
-
-    db.commit()
-    db.refresh(p)
-    return p
+    return _finalizar_ponto(db, ponto_aberto)
 
 
 def get_ponto_aberto(db: Session, id_aluno: int) -> Optional[Ponto]:

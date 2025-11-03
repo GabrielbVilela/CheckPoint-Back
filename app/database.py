@@ -25,6 +25,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def get_db():
+    """
+    Dependency-style session generator shared across the app.
+    Keeps logic in a single place to avoid circular imports.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def ensure_enderecos_columns():
     stmts = [
         """

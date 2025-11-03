@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from . import crud, models, schemas
 from .database import get_db
-from .models import TipoUsuario
+from .schemas import TipoUsuario
 
 # Configuração de Segurança
 SECRET_KEY = os.getenv("SECRET_KEY", "uma_chave_secreta_muito_longa_e_aleatoria")
@@ -63,16 +63,28 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        matricula: str = payload.get("sub")
-        if matricula is None:
+        raw_uid = payload.get("uid", payload.get("sub"))
+        matricula = payload.get("matricula") or payload.get("sub")
+
+        if raw_uid is None:
             raise credentials_exception
-        token_data = schemas.TokenData(matricula=matricula)
+
+        try:
+            uid = int(raw_uid)
+        except (TypeError, ValueError):
+            raise credentials_exception
+
+        token_data = schemas.TokenData(uid=uid, matricula=matricula)
     except JWTError:
         raise credentials_exception
-    
-    user = crud.get_usuario_by_matricula(db, matricula=token_data.matricula)
+
+    user = crud.get_user_by_id(db, token_data.uid)
     if user is None:
         raise credentials_exception
+
+    if token_data.matricula and user.matricula != token_data.matricula:
+        raise credentials_exception
+
     return user
 
 
