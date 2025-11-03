@@ -1,71 +1,66 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, Enum, DateTime, Boolean, func
+from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, Float, ForeignKey
 from sqlalchemy.orm import relationship
-from .database import Base
-import enum
-from datetime import date
-
-class TipoUsuario(str, enum.Enum):
-    aluno = "aluno"
-    professor = "professor"
-    admin = "admin" 
-    coordenador = "coordenador"
+from datetime import datetime
+from database import Base
 
 class Usuario(Base):
     __tablename__ = "usuarios"
 
     id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, nullable=False)
-    matricula = Column(String, unique=True, index=True, nullable=False)
-    senha_hash = Column(String, nullable=False)
-    contato = Column(String, nullable=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    turma = Column(String, nullable=True)
-    tipo_acesso = Column(String, nullable=False, default="aluno")
+    nome = Column(String(255), nullable=False)
+    matricula = Column(String(50), unique=True, nullable=False, index=True)
+    senha_hash = Column(String(255), nullable=False)
+    contato = Column(String(50), nullable=True)
+    email = Column(String(255), nullable=False)
+    turma = Column(String(50), nullable=True)
+    tipo_acesso = Column(String(20), nullable=False, default="aluno")
 
-    contratos_aluno = relationship("Contrato", foreign_keys="[Contrato.id_aluno]", back_populates="aluno")
-    contratos_professor = relationship("Contrato", foreign_keys="[Contrato.id_professor]", back_populates="professor")
+    contratos_aluno = relationship("Contrato", back_populates="aluno", foreign_keys="Contrato.id_aluno")
+    contratos_professor = relationship("Contrato", back_populates="professor", foreign_keys="Contrato.id_professor")
 
 
 class Endereco(Base):
     __tablename__ = "enderecos"
+
     id = Column(Integer, primary_key=True, index=True)
-    cep = Column(String, nullable=True)
-    logradouro = Column(String, nullable=False)
-    cidade = Column(String, nullable=False)
-    estado = Column(String, nullable=False)
-    numero = Column(String, nullable=True)
-    bairro = Column(String, nullable=True)
+    cep = Column(String(15), nullable=True)
+    logradouro = Column(String(255), nullable=False)
+    cidade = Column(String(120), nullable=False)
+    estado = Column(String(10), nullable=False)
+    numero = Column(String(30), nullable=True)  # <- STRING (não numeric)
+    bairro = Column(String(120), nullable=True)
     lat = Column(Float, nullable=True)
-    long = Column("long", Float, nullable=True)
+    long = Column(Float, nullable=True)
 
     contratos = relationship("Contrato", back_populates="endereco")
 
 
 class Contrato(Base):
     __tablename__ = "contratos"
+
     id = Column(Integer, primary_key=True, index=True)
     id_aluno = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     id_professor = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     id_endereco = Column(Integer, ForeignKey("enderecos.id"), nullable=False)
     data_inicio = Column(Date, nullable=True)
     data_final = Column(Date, nullable=True)
-    status = Column(String, nullable=True)
+    status = Column(Boolean, nullable=False, default=True)  # <- BOOLEAN
 
     aluno = relationship("Usuario", foreign_keys=[id_aluno], back_populates="contratos_aluno")
     professor = relationship("Usuario", foreign_keys=[id_professor], back_populates="contratos_professor")
     endereco = relationship("Endereco", back_populates="contratos")
     pontos = relationship("Ponto", back_populates="contrato")
 
-# ADICIONE A CLASSE ABAIXO
+
 class Ponto(Base):
     __tablename__ = "pontos"
 
     id = Column(Integer, primary_key=True, index=True)
-    id_contrato = Column(Integer, ForeignKey("contratos.id"), nullable=False)
-    data = Column(Date, nullable=False, default=date.today)
-    hora_entrada = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    hora_saida = Column(DateTime(timezone=True), nullable=True)
+    id_contrato = Column(Integer, ForeignKey("contratos.id"), nullable=False)  # <- existe
+    data = Column(Date, nullable=False)
+    hora_entrada = Column(DateTime, nullable=False, default=datetime.utcnow)
+    hora_saida = Column(DateTime, nullable=True)
     tempo_trabalhado_minutos = Column(Integer, nullable=True)
-    ativo = Column(Boolean, default=True, nullable=False)
+    ativo = Column(Boolean, nullable=False, default=True)
 
     contrato = relationship("Contrato", back_populates="pontos")

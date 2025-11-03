@@ -1,165 +1,183 @@
+from typing import Optional, List
+from datetime import date, datetime
 from sqlalchemy.orm import Session
-from fastapi import HTTPException 
-from . import models, schemas, utils, auth
-from datetime import datetime, timezone
-from app import services
+from sqlalchemy import and_, or_
 
+from models import Usuario, Endereco, Contrato, Ponto
+from schemas import UsuarioCreate, EnderecoCreate, ContratoCreate, PontoCheckLocation
+from utils import ensure_aware
 
-# ... (suas funções de usuário, endereço e contrato existentes) ...
-def get_usuario_by_email(db: Session, email: str):
-    return db.query(models.Usuario).filter(models.Usuario.email == email).first()
+# --------------------------------------------------------------------------
+# CRUD: Usuários
+# --------------------------------------------------------------------------
+def get_usuario_by_email(db: Session, email: str) -> Optional[Usuario]:
+    return db.query(Usuario).filter(Usuario.email == email).first()
 
-def get_usuario_by_matricula(db: Session, matricula: str):
-    return (
-        db.query(models.Usuario)
-        .filter(models.Usuario.matricula == str(matricula))
-        .first()
-    )
+def get_usuario_by_matricula(db: Session, matricula: str) -> Optional[Usuario]:
+    return db.query(Usuario).filter(Usuario.matricula == matricula).first()
 
-def get_usuario_by_contato(db: Session, contato: str):
-    return db.query(models.Usuario).filter(models.Usuario.contato == contato).first()
+def get_usuario_by_contato(db: Session, contato: str) -> Optional[Usuario]:
+    return db.query(Usuario).filter(Usuario.contato == contato).first()
 
-def create_usuario(db: Session, usuario: schemas.UsuarioCreate):
-    hashed_password = auth.get_password_hash(usuario.senha)
-    db_usuario = models.Usuario(
+def list_usuarios(db: Session, tipo: Optional[str] = None) -> List[Usuario]:
+    if tipo:
+        return db.query(Usuario).filter(Usuario.tipo_acesso == tipo).all()
+    return db.query(Usuario).all()
+
+def create_usuario(db: Session, usuario: UsuarioCreate) -> Usuario:
+    novo = Usuario(
         nome=usuario.nome,
         matricula=usuario.matricula,
-        senha_hash=hashed_password,
+        senha_hash=usuario.senha,  # ajuste conforme seu hash real
         contato=usuario.contato,
         email=usuario.email,
         turma=usuario.turma,
         tipo_acesso=usuario.tipo_acesso,
     )
-    db.add(db_usuario)
+    db.add(novo)
     db.commit()
-    db.refresh(db_usuario)
-    return db_usuario
+    db.refresh(novo)
+    return novo
 
-def list_usuarios(db: Session, tipo: str = None, skip: int = 0, limit: int = 100):
-    query = db.query(models.Usuario)
-    if tipo:
-        query = query.filter(models.Usuario.tipo_acesso == tipo)
-    return query.offset(skip).limit(limit).all()
-
-def create_endereco(db: Session, endereco: schemas.EnderecoCreate):
-    address_string = f"{endereco.logradouro}, {endereco.numero}, {endereco.bairro}, {endereco.cidade}, {endereco.estado}"
-    coords = services.get_coordinates_from_google(address_string)
-    db_endereco = models.Endereco(
-        **endereco.model_dump(),
-        lat=coords["lat"] if coords else None,
-        long=coords["lng"] if coords else None
+# --------------------------------------------------------------------------
+# CRUD: Endereços
+# --------------------------------------------------------------------------
+def create_endereco(db: Session, data: EnderecoCreate) -> Endereco:
+    novo = Endereco(
+        cep=data.cep,
+        logradouro=data.logradouro,
+        cidade=data.cidade,
+        estado=data.estado,
+        numero=data.numero,
+        bairro=data.bairro,
     )
-    db.add(db_endereco)
+    db.add(novo)
     db.commit()
-    db.refresh(db_endereco)
-    return db_endereco
+    db.refresh(novo)
+    return novo
 
-def create_contrato(db: Session, contrato: schemas.ContratoCreate):
-    db_aluno = db.query(models.Usuario).filter(models.Usuario.id == contrato.id_aluno).first()
-    if not db_aluno or db_aluno.tipo_acesso != 'aluno':
-        raise HTTPException(status_code=404, detail=f"Aluno com id {contrato.id_aluno} não encontrado ou tipo de acesso inválido.")
-    
-    db_professor = db.query(models.Usuario).filter(models.Usuario.id == contrato.id_professor).first()
-    if not db_professor or db_professor.tipo_acesso != 'professor':
-        raise HTTPException(status_code=404, detail=f"Professor com id {contrato.id_professor} não encontrado ou tipo de acesso inválido.")
+def list_enderecos(db: Session) -> List[Endereco]:
+    return db.query(Endereco).all()
 
-    db_endereco = db.query(models.Endereco).filter(models.Endereco.id == contrato.id_endereco).first()
-    if not db_endereco:
-        raise HTTPException(status_code=404, detail=f"Endereço com id {contrato.id_endereco} não encontrado.")
+# --------------------------------------------------------------------------
+# CRUD: Contratos
+# --------------------------------------------------------------------------
+def get_user_by_id(db: Session, uid: int) -> Optional[Usuario]:
+    return db.query(Usuario).filter(Usuario.id == uid).first()
 
-    db_contrato = models.Contrato(**contrato.model_dump())
-    db.add(db_contrato)
-    db.commit()
-    db.refresh(db_contrato)
-    return db_contrato
+def get_endereco_by_id(db: Session, eid: int) -> Optional[Endereco]:
+    return db.query(Endereco).filter(Endereco.id == eid).first()
 
-def get_contratos(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Contrato).offset(skip).limit(limit).all()
-
-def get_contrato_by_id(db: Session, contrato_id: int):
-    return db.query(models.Contrato).filter(models.Contrato.id == contrato_id).first()
-
-
-# --- ADICIONE AS FUNÇÕES ABAIXO ---
-
-def get_active_contract_for_student(db: Session, id_aluno: int):
-    """Busca o contrato ativo para um determinado aluno."""
-    return db.query(models.Contrato).filter(
-        models.Contrato.id_aluno == id_aluno,
-        models.Contrato.status == 'Ativo'
-    ).first()
-
-def registrar_entrada(db: Session, location_data: schemas.PontoCheckLocation):
-    contrato_ativo = get_active_contract_for_student(db, location_data.id_aluno)
-    if not contrato_ativo:
-        raise HTTPException(status_code=404, detail="Nenhum contrato ativo encontrado para este aluno.")
-
-    ponto_existente = db.query(models.Ponto).filter(
-        models.Ponto.id_contrato == contrato_ativo.id,
-        models.Ponto.ativo == True
-    ).first()
-    if ponto_existente:
-        raise HTTPException(status_code=400, detail="Já existe um registro de ponto ativo.")
-
-    endereco_estagio = contrato_ativo.endereco
-    if not endereco_estagio.lat or not endereco_estagio.long:
-        raise HTTPException(status_code=400, detail="O endereço do estágio não possui coordenadas cadastradas.")
-
-    distancia = utils.haversine_distance(
-        endereco_estagio.long, 
-        endereco_estagio.lat, 
-        location_data.longitude_atual, 
-        location_data.latitude_atual
-    )
-
-    RAIO_PERMITIDO_METROS = 100
-    if distancia > RAIO_PERMITIDO_METROS:
-        raise HTTPException(
-            status_code=403, 
-            detail=f"Você está a {int(distancia)}m do local de estágio. A entrada só é permitida dentro de {RAIO_PERMITIDO_METROS}m."
+def get_contrato_ativo_do_aluno(db: Session, id_aluno: int) -> Optional[Contrato]:
+    # Compat: boolean OR strings legadas
+    return (
+        db.query(Contrato)
+        .filter(
+            and_(
+                Contrato.id_aluno == id_aluno,
+                or_(
+                    Contrato.status.is_(True),               # booleano certo
+                    getattr(Contrato, "status") == "Ativo",  # legados
+                    getattr(Contrato, "status") == "TRUE",
+                    getattr(Contrato, "status") == "True",
+                    getattr(Contrato, "status") == "true",
+                    getattr(Contrato, "status") == "1",
+                ),
+            )
         )
-
-    novo_ponto = models.Ponto(id_contrato=contrato_ativo.id)
-    db.add(novo_ponto)
-    db.commit()
-    db.refresh(novo_ponto)
-    return novo_ponto
-
-def registrar_saida(db: Session, id_aluno: int):
-    ponto_ativo = db.query(models.Ponto).join(models.Contrato).filter(
-        models.Contrato.id_aluno == id_aluno,
-        models.Ponto.ativo == True
-    ).first()
-    if not ponto_ativo:
-        raise HTTPException(status_code=404, detail="Nenhum ponto ativo encontrado para registrar a saída.")
-
-    ponto_ativo.hora_saida = datetime.now(timezone.utc)
-    ponto_ativo.ativo = False
-    
-    tempo_trabalhado = ponto_ativo.hora_saida - ponto_ativo.hora_entrada
-    ponto_ativo.tempo_trabalhado_minutos = int(tempo_trabalhado.total_seconds() / 60)
-
-    db.commit()
-    db.refresh(ponto_ativo)
-    return ponto_ativo
-
-def check_location(db: Session, location_data: schemas.PontoCheckLocation):
-    contrato_ativo = get_active_contract_for_student(db, location_data.id_aluno)
-    if not contrato_ativo:
-        raise HTTPException(status_code=404, detail="Nenhum contrato ativo encontrado para este aluno.")
-    
-    endereco_estagio = contrato_ativo.endereco
-    if not endereco_estagio.lat or not endereco_estagio.long:
-        raise HTTPException(status_code=400, detail="O endereço do estágio não possui coordenadas cadastradas.")
-
-    distancia = utils.haversine_distance(
-        endereco_estagio.long,
-        endereco_estagio.lat,
-        location_data.longitude_atual,
-        location_data.latitude_atual
+        .first()
     )
 
-    RAIO_PERMITIDO_METROS = 100
-    dentro_da_area = distancia <= RAIO_PERMITIDO_METROS
+def create_contrato(db: Session, data: ContratoCreate) -> Contrato:
+    aluno = get_user_by_id(db, data.id_aluno)
+    prof = get_user_by_id(db, data.id_professor)
+    end = get_endereco_by_id(db, data.id_endereco)
+    if not aluno or not prof or not end:
+        raise ValueError("Aluno, Professor ou Endereço inválido(s).")
 
-    return {"dentro_da_area": dentro_da_area, "distancia_metros": round(distancia, 2)}
+    novo = Contrato(
+        id_aluno=data.id_aluno,
+        id_professor=data.id_professor,
+        id_endereco=data.id_endereco,
+        data_inicio=data.data_inicio,
+        data_final=data.data_final,
+        status=True if data.status is None else bool(data.status),
+    )
+    db.add(novo)
+    db.commit()
+    db.refresh(novo)
+    return novo
+
+def get_contratos(db: Session) -> List[Contrato]:
+    return db.query(Contrato).all()
+
+# --------------------------------------------------------------------------
+# CRUD: Ponto Eletrônico
+# --------------------------------------------------------------------------
+def ponto_entrada(db: Session, matricula: str, payload: PontoCheckLocation) -> Ponto:
+    user = get_usuario_by_matricula(db, matricula)
+    if not user:
+        raise ValueError("Usuário não encontrado.")
+
+    contrato = get_contrato_ativo_do_aluno(db, payload.id_aluno)
+    if not contrato:
+        raise ValueError("Nenhum contrato ativo para este aluno.")
+
+    # Impede ponto duplicado aberto para o contrato
+    ponto_aberto = (
+        db.query(Ponto)
+        .filter(and_(Ponto.id_contrato == contrato.id, Ponto.ativo.is_(True)))
+        .first()
+    )
+    if ponto_aberto:
+        raise ValueError("Já existe um ponto em aberto para este aluno.")
+
+    agora = datetime.utcnow()
+    p = Ponto(
+        id_contrato=contrato.id,
+        data=date.today(),
+        hora_entrada=agora,
+        ativo=True,
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
+
+def ponto_saida(db: Session, matricula: str) -> Ponto:
+    user = get_usuario_by_matricula(db, matricula)
+    if not user:
+        raise ValueError("Usuário não encontrado.")
+
+    # Busca ponto em aberto (ativo) pelo contrato do aluno
+    p = (
+        db.query(Ponto)
+        .join(Contrato, Contrato.id == Ponto.id_contrato)
+        .filter(and_(Contrato.id_aluno == user.id, Ponto.ativo.is_(True)))
+        .first()
+    )
+    if not p:
+        raise ValueError("Nenhum ponto em aberto encontrado para este aluno.")
+
+    p.hora_saida = datetime.utcnow()
+    # Garante timezone-aware para cálculo seguro
+    he = ensure_aware(p.hora_entrada)
+    hs = ensure_aware(p.hora_saida)
+    if he and hs:
+        delta = hs - he
+        p.tempo_trabalhado_minutos = int(delta.total_seconds() // 60)
+    p.ativo = False
+
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+def get_ponto_aberto(db: Session, id_aluno: int) -> Optional[Ponto]:
+    """Retorna o ponto em aberto (ativo) do aluno, se existir."""
+    return (
+        db.query(Ponto)
+        .join(Contrato, Contrato.id == Ponto.id_contrato)
+        .filter(and_(Contrato.id_aluno == id_aluno, Ponto.ativo.is_(True)))
+        .first()
+    )

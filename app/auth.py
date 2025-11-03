@@ -85,13 +85,13 @@ def get_current_active_user(current_user: models.Usuario = Depends(get_current_u
 
 def get_current_active_aluno(current_user: models.Usuario = Depends(get_current_active_user)) -> models.Usuario:
     """Verifica se o utilizador logado é um aluno."""
-    if current_user.tipo_acesso != TipoUsuario.aluno:
+    if current_user.tipo_acesso != TipoUsuario.aluno.value:
         raise HTTPException(status_code=403, detail="Acesso restrito a alunos.")
     return current_user
 
 def get_current_active_professor(current_user: models.Usuario = Depends(get_current_active_user)) -> models.Usuario:
     """Verifica se o utilizador logado é um professor."""
-    if current_user.tipo_acesso != TipoUsuario.professor:
+    if current_user.tipo_acesso != TipoUsuario.professor.value:
         raise HTTPException(status_code=403, detail="Acesso restrito a professores.")
     return current_user
 

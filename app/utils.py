@@ -1,4 +1,5 @@
 from math import radians, cos, sin, asin, sqrt
+from datetime import timezone, datetime
 
 def haversine_distance(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
     """
@@ -17,3 +18,18 @@ def haversine_distance(lon1: float, lat1: float, lon2: float, lat2: float) -> fl
     # Raio da Terra em quilômetros é 6371
     metros = c * 6371 * 1000
     return metros
+
+
+def ensure_aware(dt: datetime) -> datetime:
+    """Garante que um datetime seja timezone-aware (UTC) para operar com deltas com segurança.
+    Se for naive, assume UTC.
+    """
+    if dt is None:
+        return None
+    try:
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        # Em caso de tzinfo estranho, força UTC
+        return dt.replace(tzinfo=timezone.utc)
