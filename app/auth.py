@@ -1,37 +1,24 @@
-import os
+﻿import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from . import crud, models, schemas
 from .database import get_db
 from .schemas import TipoUsuario
+from .security import verify_password
 
-# Configuração de Segurança
+# ConfiguraÃ§Ã£o de SeguranÃ§a
 SECRET_KEY = os.getenv("SECRET_KEY", "uma_chave_secreta_muito_longa_e_aleatoria")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
 
-# Contexto para Hashing de Senhas
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Esquema de Autenticação OAuth2
+# Esquema de AutenticaÃ§Ã£o OAuth2
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifica se a senha fornecida corresponde ao hash."""
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password: str) -> str:
-    """Gera o hash de uma senha."""
-    return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -47,7 +34,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 def authenticate_user(db: Session, matricula: str, password: str) -> Optional[models.Usuario]:
-    """Autentica um utilizador pela matrícula e senha."""
+    """Autentica um utilizador pela matrÃ­cula e senha."""
     user = crud.get_usuario_by_matricula(db, matricula=matricula)
     if not user or not verify_password(password, user.senha_hash):
         return None
@@ -58,7 +45,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     """Decodifica o token e retorna o utilizador correspondente."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Não foi possível validar as credenciais",
+        detail="NÃ£o foi possÃ­vel validar as credenciais",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -89,21 +76,28 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 
 def get_current_active_user(current_user: models.Usuario = Depends(get_current_user)) -> models.Usuario:
-    """Verifica se o utilizador obtido do token está ativo."""
-    # Futuramente, pode-se adicionar uma verificação de 'user.disabled' aqui
+    """Verifica se o utilizador obtido do token estÃ¡ ativo."""
+    # Futuramente, pode-se adicionar uma verificaÃ§Ã£o de 'user.disabled' aqui
     return current_user
 
-# --- Funções de Dependência por Perfil ---
+# --- FunÃ§Ãµes de DependÃªncia por Perfil ---
 
 def get_current_active_aluno(current_user: models.Usuario = Depends(get_current_active_user)) -> models.Usuario:
-    """Verifica se o utilizador logado é um aluno."""
+    """Verifica se o utilizador logado Ã© um aluno."""
     if current_user.tipo_acesso != TipoUsuario.aluno.value:
         raise HTTPException(status_code=403, detail="Acesso restrito a alunos.")
     return current_user
 
 def get_current_active_professor(current_user: models.Usuario = Depends(get_current_active_user)) -> models.Usuario:
-    """Verifica se o utilizador logado é um professor."""
+    """Verifica se o utilizador logado Ã© um professor."""
     if current_user.tipo_acesso != TipoUsuario.professor.value:
         raise HTTPException(status_code=403, detail="Acesso restrito a professores.")
+    return current_user
+
+
+def get_current_active_supervisor(current_user: models.Usuario = Depends(get_current_active_user)) -> models.Usuario:
+    """Verifica se o utilizador logado é um supervisor."""
+    if current_user.tipo_acesso != TipoUsuario.supervisor.value:
+        raise HTTPException(status_code=403, detail="Acesso restrito a supervisores.")
     return current_user
 
