@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import math
 import re
 import json
@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func, cast, String, or_
 
-from . import services
+from . import services, schemas, models
 from .models import (
     Usuario,
     Endereco,
@@ -22,6 +22,8 @@ from .models import (
     JustificativaLog,
     DiarioAtividade,
     Documento,
+    AvaliacaoRubrica,
+    Avaliacao,
 )
 from .schemas import (
     UsuarioCreate,
@@ -42,6 +44,9 @@ from .schemas import (
     DiarioStatus,
     DocumentoCreate,
     DocumentoUpdate,
+    AvaliacaoRubricaCreate,
+    AvaliacaoCreate,
+    AvaliacaoStatus,
 )
 from .utils import ensure_aware, haversine_distance
 from .security import get_password_hash
@@ -135,7 +140,7 @@ def get_curso_by_id(db: Session, curso_id: int) -> Optional[Curso]:
 def create_turma(db: Session, data: TurmaCreate) -> Turma:
     curso = get_curso_by_id(db, data.id_curso)
     if not curso:
-        raise ValueError("Curso informado n�o existe.")
+        raise ValueError("Curso informado não existe.")
 
     turma = Turma(
         nome=data.nome.strip(),
@@ -862,6 +867,7 @@ def create_avaliacao(
     rubrica_id: int,
     avaliador_id: int,
     payload: AvaliacaoCreate,
+    AvaliacaoStatus,
 ) -> Avaliacao:
     contrato = get_contrato_by_id(db, contrato_id)
     if not contrato:
@@ -1226,3 +1232,5 @@ def obter_timeline_do_dia(
     diarios = get_diarios_por_data(db, aluno_id, dia)
     avaliacoes = get_avaliacoes_por_data(db, aluno_id, dia)
     return pontos, justificativas, diarios, avaliacoes, total, esperado, saldo
+
+

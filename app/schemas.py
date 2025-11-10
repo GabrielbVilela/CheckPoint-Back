@@ -1,10 +1,10 @@
-from pydantic import BaseModel, EmailStr, Field, AliasChoices, field_validator
+﻿from pydantic import BaseModel, EmailStr, Field, AliasChoices, field_validator
 from typing import Literal, Optional, Union, List
 from datetime import date, datetime, time
 from enum import Enum
 
 # ------------------------------------------------------------
-# Tipos e Usuários
+# Tipos e UsuÃ¡rios
 # ------------------------------------------------------------
 class TipoUsuario(str, Enum):
     aluno = "aluno"
@@ -121,7 +121,7 @@ class SupervisorExternoUpdate(BaseModel):
 
 
 # ------------------------------------------------------------
-# Convênios
+# ConvÃªnios
 # ------------------------------------------------------------
 class ConvenioCreate(BaseModel):
     id_empresa: int
@@ -241,12 +241,12 @@ class DiarioAtividadeOut(BaseModel):
 
 
 # ------------------------------------------------------------
-# Avaliações
+# AvaliaÃ§Ãµes
 # ------------------------------------------------------------
 class AvaliacaoRubricaCreate(BaseModel):
     nome: str
     descricao: Optional[str] = None
-    criterios: Optional[str] = None  # JSON string com pesos/descrições
+    criterios: Optional[str] = None  # JSON string com pesos/descriÃ§Ãµes
 
 
 class AvaliacaoRubricaOut(AvaliacaoRubricaCreate):
@@ -287,7 +287,7 @@ class AvaliacaoOut(AvaliacaoCreate):
 
 
 # ------------------------------------------------------------
-# Endereços
+# EndereÃ§os
 # ------------------------------------------------------------
 class EnderecoCreate(BaseModel):
     cep: Optional[str] = None
@@ -364,7 +364,7 @@ class ContratoCreate(BaseModel):
                     return datetime.strptime(text, fmt).time()
                 except ValueError:
                     continue
-        raise ValueError("Horário inválido. Use HH:MM.")
+        raise ValueError("HorÃ¡rio invÃ¡lido. Use HH:MM.")
 
     @field_validator("hora_inicio_prevista", "hora_fim_prevista", mode="before")
     @classmethod
@@ -399,10 +399,10 @@ class ContratoOut(BaseModel):
 
 
 # ------------------------------------------------------------
-# Ponto Eletrônico
+# Ponto EletrÃ´nico
 # ------------------------------------------------------------
 class PontoLocalizacaoIn(BaseModel):
-    """Payload de entrada do cliente: apenas a localização atual."""
+    """Payload de entrada do cliente: apenas a localizaÃ§Ã£o atual."""
     latitude_atual: float = Field(validation_alias=AliasChoices("latitude_atual", "latitudeAtual"))
     longitude_atual: float = Field(validation_alias=AliasChoices("longitude_atual", "longitudeAtual"))
     precisao_metros: Optional[float] = Field(
@@ -411,7 +411,7 @@ class PontoLocalizacaoIn(BaseModel):
 
 
 class PontoCheckLocation(BaseModel):
-    """Payload interno: inclui id_aluno + localização (compat com legado)."""
+    """Payload interno: inclui id_aluno + localizaÃ§Ã£o (compat com legado)."""
     id_aluno: int = Field(validation_alias=AliasChoices("id_aluno", "idAluno"))
     latitude_atual: float = Field(validation_alias=AliasChoices("latitude_atual", "latitudeAtual"))
     longitude_atual: float = Field(validation_alias=AliasChoices("longitude_atual", "longitudeAtual"))
@@ -507,7 +507,7 @@ class DocumentoUploadOut(BaseModel):
 
 
 class AlunoImportRequest(BaseModel):
-    registros: List[AlunoCadastroIn]
+    registros: List["AlunoCadastroIn"]
 
 
 class AlunoImportResponse(BaseModel):
@@ -570,7 +570,7 @@ class AlunoCadastroIn(BaseModel):
                     return datetime.strptime(text, fmt).date()
                 except ValueError:
                     continue
-        raise ValueError("Data inválida. Use dd/mm/aaaa ou ISO (YYYY-MM-DD).")
+        raise ValueError("Data invÃ¡lida. Use dd/mm/aaaa ou ISO (YYYY-MM-DD).")
 
     @field_validator("estado", mode="before")
     @classmethod
@@ -594,7 +594,7 @@ class AlunoCadastroIn(BaseModel):
                     return datetime.strptime(text, fmt).time()
                 except ValueError:
                     continue
-        raise ValueError("Horário inválido. Use HH:MM.")
+        raise ValueError("HorÃ¡rio invÃ¡lido. Use HH:MM.")
 
     @field_validator("hora_inicio_prevista", "hora_fim_prevista", mode="before")
     @classmethod
@@ -619,3 +619,4 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     matricula: Optional[str] = None
     uid: Optional[int] = None
+

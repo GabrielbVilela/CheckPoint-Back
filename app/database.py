@@ -1,4 +1,4 @@
-# database.py
+﻿# database.py
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -7,13 +7,15 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 if not DATABASE_URL:
     DB_USER = os.getenv("POSTGRES_USER", "postgres")
-    DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
-    DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
-    DB_PORT = os.getenv("POSTGRES_PORT", "5432")
-    DB_NAME = os.getenv("POSTGRES_DB", "backend_db")
-    DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    DB_PASS = os.getenv("POSTGRES_PASSWORD", "a91796aced16b4794fab")
+    DB_HOST = os.getenv("POSTGRES_HOST", "147.93.8.172")
+    DB_PORT = os.getenv("POSTGRES_PORT", "5433")
+    DB_NAME = os.getenv("POSTGRES_DB", "checheckpoint_db")
+    DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable"
 
 engine = create_engine(
     DATABASE_URL,
@@ -209,3 +211,5 @@ def ensure_avaliacoes_columns():
             conn.execute(text(s))
         for s in avaliacao_stmts:
             conn.execute(text(s))
+
+
