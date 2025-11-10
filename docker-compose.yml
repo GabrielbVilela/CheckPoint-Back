@@ -1,0 +1,33 @@
+services:
+  postgres_db:
+    image: postgres:15
+    container_name: postgres_db_v2
+    restart: always
+    env_file:
+      - .env  # <-- Lê as variáveis daqui
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      retries: 5
+      start_period: 10s
+
+  fastapi_backend:
+    build: .
+    container_name: fastapi_backend_v2
+    command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    volumes:
+      - .:/app
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+    env_file:
+      - .env  # <-- Também lê as variáveis daqui
+
+volumes:
+  postgres_data:
