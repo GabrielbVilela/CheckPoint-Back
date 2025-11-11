@@ -512,7 +512,7 @@ def _avaliar_geofencing(contrato: Contrato, latitude: float, longitude: float) -
     if not endereco or endereco.lat is None or endereco.long is None:
         return {
             "dentro": True,
-            "mensagem": "Endere��o sem coordenadas geogrǭficas. Valida��o manual necessǭria.",
+            "mensagem": "Endereço sem coordenadas geográficas. Validação manual necessária.",
             "distancia": None,
             "raio": raio,
             "alerta": "endereco_sem_coordenadas",
@@ -523,7 +523,7 @@ def _avaliar_geofencing(contrato: Contrato, latitude: float, longitude: float) -
     if distancia <= raio:
         return {
             "dentro": True,
-            "mensagem": "Localiza��o validada dentro do raio permitido.",
+            "mensagem": "Localização validada dentro do raio permitido.",
             "distancia": distancia,
             "raio": raio,
             "alerta": None,
@@ -532,7 +532,7 @@ def _avaliar_geofencing(contrato: Contrato, latitude: float, longitude: float) -
 
     return {
         "dentro": False,
-        "mensagem": f"Localiza��o fora da ��rea permitida ({distancia:.1f}m > {raio}m).",
+        "mensagem": f"Localização fora da área permitida ({distancia:.1f}m > {raio}m).",
         "distancia": distancia,
         "raio": raio,
         "alerta": "fora_da_area",
@@ -550,7 +550,7 @@ def _avaliar_janela(contrato: Contrato, referencia: datetime) -> dict:
     janela_fim = datetime.combine(referencia.date(), hora_prevista) + timedelta(minutes=tolerancia)
 
     if janela_inicio <= referencia <= janela_fim:
-        return {"dentro": True, "mensagem": "Dentro da janela de toler��ncia.", "alerta": None}
+        return {"dentro": True, "mensagem": "Dentro da janela de tolerância.", "alerta": None}
 
     status = "antes" if referencia < janela_inicio else "depois"
     mensagem = f"Registro realizado fora da janela ({status})."
