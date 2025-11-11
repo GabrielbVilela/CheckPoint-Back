@@ -1100,6 +1100,8 @@ def obter_timeline_ponto(
         justificativas_out = [schemas.JustificativaOut.model_validate(j) for j in justificativas]
         diarios_out = [schemas.DiarioAtividadeOut.model_validate(d) for d in diarios]
         avaliacoes_out = [schemas.AvaliacaoOut.model_validate(a) for a in avaliacoes]
+        contratos_ativos = crud.list_contratos_ativos_do_aluno(db, current_user.id)
+        contratos_out = [schemas.ContratoOut.model_validate(c) for c in contratos_ativos]
         return schemas.PontoTimelineOut(
             data=dia,
             total_minutos=total,
@@ -1109,6 +1111,7 @@ def obter_timeline_ponto(
             justificativas=justificativas_out,
             diarios=diarios_out,
             avaliacoes=avaliacoes_out,
+            contratos=contratos_out,
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

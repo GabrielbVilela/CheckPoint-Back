@@ -2,6 +2,8 @@
 from typing import Literal, Optional, Union, List
 from datetime import date, datetime, time
 from enum import Enum
+import json
+import unicodedata
 
 # ------------------------------------------------------------
 # Tipos e UsuÃ¡rios
@@ -282,6 +284,30 @@ class AvaliacaoOut(AvaliacaoCreate):
     atualizado_em: datetime
     rubrica: Optional[AvaliacaoRubricaOut] = None
 
+    @field_validator("notas", mode="before")
+    @classmethod
+    def ensure_notas_dict(cls, value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return None
+        return value
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status_value(cls, value):
+        if isinstance(value, str):
+            normalized = (
+                unicodedata.normalize("NFKD", value)
+                .encode("ascii", "ignore")
+                .decode("ascii")
+                .lower()
+                .strip()
+            )
+            return normalized
+        return value
+
     class Config:
         from_attributes = True
 
@@ -461,6 +487,7 @@ class PontoTimelineOut(BaseModel):
     justificativas: List[JustificativaOut]
     diarios: List[DiarioAtividadeOut]
     avaliacoes: List[AvaliacaoOut]
+    contratos: List[ContratoOut] = []
 
 
 # ------------------------------------------------------------

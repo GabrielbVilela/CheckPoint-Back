@@ -682,7 +682,7 @@ def list_justificativas(
         )
     elif current_user.tipo_acesso == TipoUsuario.supervisor.value:
         query = query.join(Contrato, Contrato.id == Justificativa.id_contrato).filter(
-            Contrato.id_supervisor_externo.isnot(None)
+            Contrato.id_supervisor_externo == current_user.id
         )
 
     return query.order_by(Justificativa.criado_em.desc()).all()
@@ -792,7 +792,7 @@ def list_diarios(
         )
     elif current_user.tipo_acesso == TipoUsuario.supervisor.value:
         query = query.join(Contrato, Contrato.id == DiarioAtividade.id_contrato).filter(
-            Contrato.id_supervisor_externo.isnot(None)
+            Contrato.id_supervisor_externo == current_user.id
         )
 
     return query.order_by(DiarioAtividade.data_referencia.desc(), DiarioAtividade.criado_em.desc()).all()
