@@ -264,3 +264,18 @@ class Documento(Base):
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     contrato = relationship("Contrato")
+    logs = relationship("DocumentoLog", back_populates="documento", cascade="all, delete-orphan")
+
+
+class DocumentoLog(Base):
+    __tablename__ = "documento_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    documento_id = Column(Integer, ForeignKey("documentos.id"), nullable=False)
+    status = Column(String(20), nullable=False)
+    comentario = Column(Text, nullable=True)
+    id_usuario = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow)
+
+    documento = relationship("Documento", back_populates="logs")
+    usuario = relationship("Usuario")

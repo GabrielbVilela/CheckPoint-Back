@@ -1,15 +1,19 @@
 import base64
+import csv
+import io
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from pathlib import Path
 from typing import List, Optional, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -35,8 +39,13 @@ from .schemas import (
     DocumentoUpdate,
     DocumentoUploadIn,
     DocumentoUploadOut,
+    DocumentoAnalyticsGroup,
+    DocumentoAnalyticsItem,
+    DocumentoExportInlineOut,
+    DocumentoStatus,
 )
 from .permissions import require_roles
+from fastapi import Response
 
 # -----------------------------------------------------------------------------
 # Lifespan da Aplicação
@@ -548,7 +557,7 @@ def criar_documento(
     current_user: models.Usuario = Depends(require_roles(*ACADEMIC_WRITE_ROLES)),
 ):
     try:
-        documento = crud.create_documento(db=db, data=payload)
+        documento = crud.create_documento(db=db, data=payload, usuario=current_user)
         return DocumentoOut.model_validate(documento)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -559,14 +568,194 @@ def criar_documento(
 @app.get("/documentos", response_model=List[DocumentoOut], tags=["Documentos"])
 def listar_documentos(
     contrato_id: Optional[int] = Query(default=None),
+    status_filter: Optional[DocumentoStatus] = Query(default=None),
+    tipo: Optional[str] = Query(default=None),
+    curso_id: Optional[int] = Query(default=None),
+    empresa_id: Optional[int] = Query(default=None),
+    periodo: Optional[str] = Query(default=None),
+    data_inicio: Optional[date] = Query(default=None, description="Filtra documentos criados a partir desta data."),
+    data_fim: Optional[date] = Query(default=None, description="Filtra documentos criados até esta data."),
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(require_roles(*ACADEMIC_VIEW_ROLES)),
 ):
     try:
-        documentos = crud.list_documentos(db=db, contrato_id=contrato_id)
+        documentos = crud.list_documentos(
+            db=db,
+            contrato_id=contrato_id,
+            status=status_filter.value if status_filter else None,
+            tipo=tipo,
+            curso_id=curso_id,
+            empresa_id=empresa_id,
+            periodo=periodo,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+        )
         return [DocumentoOut.model_validate(doc) for doc in documentos]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documentos/resumo", response_model=schemas.DocumentoResumoOut, tags=["Documentos"])
+def resumo_documentos(
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(require_roles(*ACADEMIC_VIEW_ROLES)),
+):
+    try:
+        resumo = crud.documentos_resumo(db)
+        return schemas.DocumentoResumoOut(
+            pendentes=resumo.get("pendente", 0),
+            aprovados=resumo.get("aprovado", 0),
+            rejeitados=resumo.get("rejeitado", 0),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documentos/analytics", response_model=List[DocumentoAnalyticsItem], tags=["Documentos"])
+def documentos_analytics_endpoint(
+    group_by: DocumentoAnalyticsGroup = Query(default=DocumentoAnalyticsGroup.curso),
+    limit: int = Query(default=5, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(require_roles(*ACADEMIC_VIEW_ROLES)),
+):
+    try:
+        itens = crud.documentos_analytics(db=db, group_by=group_by.value, limit=limit)
+        return [DocumentoAnalyticsItem(**item) for item in itens]
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documentos/export", tags=["Documentos"])
+def exportar_documentos(
+    formato: str = Query(default="csv", pattern="^(csv|pdf)$"),
+    inline: bool = Query(
+        default=False,
+        description="Quando verdadeiro, retorna o arquivo em base64 no corpo da resposta.",
+    ),
+    contrato_id: Optional[int] = Query(default=None),
+    status_filter: Optional[DocumentoStatus] = Query(default=None),
+    tipo: Optional[str] = Query(default=None),
+    curso_id: Optional[int] = Query(default=None),
+    empresa_id: Optional[int] = Query(default=None),
+    periodo: Optional[str] = Query(default=None),
+    data_inicio: Optional[date] = Query(default=None),
+    data_fim: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(require_roles(*ACADEMIC_VIEW_ROLES)),
+):
+    documentos = crud.list_documentos(
+        db=db,
+        contrato_id=contrato_id,
+        status=status_filter.value if status_filter else None,
+        tipo=tipo,
+        curso_id=curso_id,
+        empresa_id=empresa_id,
+        periodo=periodo,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+    )
+    if not documentos:
+        raise HTTPException(status_code=404, detail="Nenhum documento encontrado para os filtros informados.")
+
+    linhas = []
+    for doc in documentos:
+        contrato = doc.contrato
+        aluno = contrato.aluno if contrato else None
+        turma = contrato.turma if contrato else None
+        curso = turma.curso if turma else None
+        convenio = contrato.convenio if contrato else None
+        empresa = convenio.empresa if convenio else None
+        logs = sorted(doc.logs or [], key=lambda l: l.criado_em or datetime.min)
+        trilha = " | ".join(
+            f"{(log.criado_em or datetime.utcnow()).strftime('%d/%m/%Y %H:%M')} - {log.status} - {(log.comentario or '').strip()}"
+            for log in logs
+        )
+        linhas.append(
+            {
+                "id": doc.id,
+                "contrato": doc.id_contrato,
+                "tipo": doc.tipo.value if hasattr(doc.tipo, "value") else doc.tipo,
+                "status": doc.status,
+                "aluno": aluno.nome if aluno else None,
+                "turma": turma.nome if turma else None,
+                "curso": curso.nome if curso else None,
+                "empresa": (empresa.nome_fantasia or empresa.razao_social) if empresa else None,
+                "criado_em": doc.criado_em.strftime("%d/%m/%Y %H:%M"),
+                "atualizado_em": doc.atualizado_em.strftime("%d/%m/%Y %H:%M"),
+                "observacoes": doc.observacoes or "",
+                "trilha": trilha,
+            }
+        )
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    if formato == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, delimiter=";")
+        writer.writerow(
+            ["ID", "Contrato", "Tipo", "Status", "Aluno", "Turma", "Curso", "Empresa", "Criado em", "Atualizado em", "Observações", "Trilha"]
+        )
+        for linha in linhas:
+            writer.writerow(
+                [
+                    linha["id"],
+                    linha["contrato"],
+                    linha["tipo"],
+                    linha["status"],
+                    linha["aluno"] or "",
+                    linha["turma"] or "",
+                    linha["curso"] or "",
+                    linha["empresa"] or "",
+                    linha["criado_em"],
+                    linha["atualizado_em"],
+                    linha["observacoes"],
+                    linha["trilha"],
+                ]
+            )
+        data_bytes = buffer.getvalue().encode("utf-8-sig")
+        mime_type = "text/csv"
+        filename = f"documentos_{timestamp}.csv"
+    else:
+        pdf_buffer = io.BytesIO()
+        pdf = canvas.Canvas(pdf_buffer, pagesize=A4)
+        width, height = A4
+        y = height - 40
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(40, y, "Relatório de Documentos Institucionais")
+        y -= 24
+        pdf.setFont("Helvetica", 9)
+        for linha in linhas:
+            bloco = [
+                f"Documento #{linha['id']} - Contrato {linha['contrato']} ({linha['status']})",
+                f"Aluno: {linha['aluno'] or 'N/D'} | Curso: {linha['curso'] or 'N/D'} | Empresa: {linha['empresa'] or 'N/D'}",
+                f"Tipo: {linha['tipo']} | Criado em: {linha['criado_em']} | Atualizado em: {linha['atualizado_em']}",
+                f"Observações: {linha['observacoes'] or '---'}",
+                f"Trilha: {linha['trilha'] or '---'}",
+            ]
+            for texto in bloco:
+                if y < 60:
+                    pdf.showPage()
+                    pdf.setFont("Helvetica", 9)
+                    y = height - 40
+                pdf.drawString(40, y, texto[:120])
+                y -= 14
+            y -= 8
+        pdf.save()
+        data_bytes = pdf_buffer.getvalue()
+        pdf_buffer.close()
+        mime_type = "application/pdf"
+        filename = f"documentos_{timestamp}.pdf"
+
+    if inline:
+        encoded = base64.b64encode(data_bytes).decode("utf-8")
+        return DocumentoExportInlineOut(filename=filename, mime_type=mime_type, content_base64=encoded)
+
+    return StreamingResponse(
+        iter([data_bytes]),
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.patch(
@@ -581,7 +770,12 @@ def atualizar_documento(
     current_user: models.Usuario = Depends(require_roles(*ACADEMIC_WRITE_ROLES)),
 ):
     try:
-        documento = crud.update_documento(db=db, documento_id=documento_id, data=payload)
+        documento = crud.update_documento(
+            db=db,
+            documento_id=documento_id,
+            data=payload,
+            usuario=current_user,
+        )
         return DocumentoOut.model_validate(documento)
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
@@ -941,6 +1135,42 @@ def create_aluno_completo_endpoint(
         endereco=schemas.EnderecoOut.model_validate(endereco),
         contrato=schemas.ContratoOut.model_validate(contrato),
     )
+
+
+@app.patch(
+    "/usuarios/{usuario_id}",
+    response_model=schemas.UsuarioOut,
+    tags=["Usuarios"],
+    dependencies=[Depends(require_roles(*USER_MANAGEMENT_ROLES))],
+)
+def atualizar_usuario(
+    usuario_id: int,
+    payload: schemas.UsuarioUpdate,
+    db: Session = Depends(get_db),
+):
+    try:
+        usuario = crud.update_usuario(db=db, usuario_id=usuario_id, data=payload)
+        return schemas.UsuarioOut.model_validate(usuario)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.delete(
+    "/usuarios/{usuario_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Usuarios"],
+    dependencies=[Depends(require_roles(*USER_MANAGEMENT_ROLES))],
+)
+def remover_usuario(usuario_id: int, db: Session = Depends(get_db)):
+    try:
+        crud.delete_usuario(db=db, usuario_id=usuario_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # -----------------------------------------------------------------------------
 # Contratos e Endereços

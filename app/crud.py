@@ -5,7 +5,7 @@ import json
 from typing import Optional, List, Tuple
 from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, func, cast, String, or_
+from sqlalchemy import and_, func, cast, String, or_, case
 
 from . import services, schemas, models
 from .models import (
@@ -22,11 +22,13 @@ from .models import (
     JustificativaLog,
     DiarioAtividade,
     Documento,
+    DocumentoLog,
     AvaliacaoRubrica,
     Avaliacao,
 )
 from .schemas import (
     UsuarioCreate,
+    UsuarioUpdate,
     EnderecoCreate,
     ContratoCreate,
     PontoCheckLocation,
@@ -44,6 +46,7 @@ from .schemas import (
     DiarioStatus,
     DocumentoCreate,
     DocumentoUpdate,
+    DocumentoStatus,
     AvaliacaoRubricaCreate,
     AvaliacaoCreate,
     AvaliacaoStatus,
@@ -110,6 +113,47 @@ def create_usuario(db: Session, usuario: UsuarioCreate) -> Usuario:
     db.commit()
     db.refresh(novo)
     return novo
+
+
+def update_usuario(db: Session, usuario_id: int, data: UsuarioUpdate) -> Usuario:
+    usuario = get_usuario_by_id(db, usuario_id)
+    if not usuario:
+        raise ValueError("Usuario nao encontrado.")
+
+    if data.matricula and data.matricula != usuario.matricula:
+        if get_usuario_by_matricula(db, data.matricula):
+            raise ValueError("Matricula ja cadastrada.")
+        usuario.matricula = data.matricula.strip()
+
+    if data.email and data.email != usuario.email:
+        if get_usuario_by_email(db, data.email):
+            raise ValueError("Email ja cadastrado.")
+        usuario.email = data.email
+
+    if data.contato and data.contato != usuario.contato:
+        if get_usuario_by_contato(db, data.contato):
+            raise ValueError("Contato ja cadastrado.")
+        usuario.contato = data.contato
+
+    if data.senha:
+        usuario.senha_hash = get_password_hash(data.senha)
+
+    for field in ("nome", "turma", "periodo"):
+        value = getattr(data, field)
+        if value is not None:
+            setattr(usuario, field, value if field != "nome" else value.strip())
+
+    db.commit()
+    db.refresh(usuario)
+    return usuario
+
+
+def delete_usuario(db: Session, usuario_id: int) -> None:
+    usuario = get_usuario_by_id(db, usuario_id)
+    if not usuario:
+        raise ValueError("Usuario nao encontrado.")
+    db.delete(usuario)
+    db.commit()
 
 # --------------------------------------------------------------------------
 # CRUD: Cursos
@@ -319,7 +363,24 @@ def delete_convenio(db: Session, convenio_id: int) -> None:
     db.commit()
 
 
-def create_documento(db: Session, data: DocumentoCreate) -> Documento:
+def _registrar_documento_log(
+    db: Session,
+    documento: Documento,
+    status: str,
+    comentario: Optional[str],
+    usuario: Optional[Usuario] = None,
+) -> DocumentoLog:
+    log = DocumentoLog(
+        documento_id=documento.id,
+        status=status,
+        comentario=comentario,
+        id_usuario=usuario.id if usuario else None,
+    )
+    db.add(log)
+    return log
+
+
+def create_documento(db: Session, data: DocumentoCreate, usuario: Optional[Usuario] = None) -> Documento:
     contrato = get_contrato_by_id(db, data.id_contrato)
     if not contrato:
         raise ValueError("Contrato informado não existe.")
@@ -327,32 +388,133 @@ def create_documento(db: Session, data: DocumentoCreate) -> Documento:
         id_contrato=data.id_contrato,
         tipo=data.tipo.value if hasattr(data.tipo, "value") else data.tipo,
         arquivo_url=data.arquivo_url,
-        status="pendente",
+        status=(data.status.value if hasattr(data.status, "value") else data.status) or "pendente",
         observacoes=data.observacoes,
     )
     db.add(documento)
     db.commit()
     db.refresh(documento)
+    _registrar_documento_log(db, documento, documento.status, comentario="Documento criado", usuario=usuario)
+    db.commit()
     return documento
 
 
-def list_documentos(db: Session, contrato_id: Optional[int] = None) -> List[Documento]:
-    query = db.query(Documento).options(joinedload(Documento.contrato))
+def list_documentos(
+    db: Session,
+    contrato_id: Optional[int] = None,
+    status: Optional[str] = None,
+    tipo: Optional[str] = None,
+    curso_id: Optional[int] = None,
+    empresa_id: Optional[int] = None,
+    periodo: Optional[str] = None,
+    data_inicio: Optional[date] = None,
+    data_fim: Optional[date] = None,
+) -> List[Documento]:
+    query = db.query(Documento).options(
+        joinedload(Documento.contrato)
+        .joinedload(Contrato.aluno),
+        joinedload(Documento.contrato)
+        .joinedload(Contrato.turma)
+        .joinedload(Turma.curso),
+        joinedload(Documento.contrato)
+        .joinedload(Contrato.convenio)
+        .joinedload(Convenio.empresa),
+        joinedload(Documento.logs).joinedload(DocumentoLog.usuario),
+    )
     if contrato_id:
         query = query.filter(Documento.id_contrato == contrato_id)
+    if status:
+        query = query.filter(func.lower(Documento.status) == status.lower())
+    if tipo:
+        query = query.filter(Documento.tipo == tipo)
+
+    joined_contrato = False
+    if any([curso_id, empresa_id, periodo]):
+        query = query.join(Documento.contrato)
+        joined_contrato = True
+
+    if curso_id:
+        query = (
+            query.join(Contrato.turma, isouter=True)
+            .join(Turma.curso, isouter=True)
+            .filter(Curso.id == curso_id)
+        )
+    if empresa_id:
+        if not joined_contrato:
+            query = query.join(Documento.contrato)
+            joined_contrato = True
+        query = (
+            query.join(Contrato.convenio, isouter=True)
+            .join(Convenio.empresa, isouter=True)
+            .filter(Empresa.id == empresa_id)
+        )
+    if periodo:
+        if not joined_contrato:
+            query = query.join(Documento.contrato)
+            joined_contrato = True
+        query = query.join(Contrato.aluno).filter(func.lower(Usuario.periodo) == periodo.lower())
+
+    if data_inicio:
+        query = query.filter(func.date(Documento.criado_em) >= data_inicio)
+    if data_fim:
+        query = query.filter(func.date(Documento.criado_em) <= data_fim)
+
     return query.order_by(Documento.criado_em.desc()).all()
 
 
 def get_documento_by_id(db: Session, documento_id: int) -> Optional[Documento]:
-    return db.query(Documento).filter(Documento.id == documento_id).first()
+    return (
+        db.query(Documento)
+        .options(joinedload(Documento.logs).joinedload(DocumentoLog.usuario))
+        .filter(Documento.id == documento_id)
+        .first()
+    )
 
 
-def update_documento(db: Session, documento_id: int, data: DocumentoUpdate) -> Documento:
+def update_documento(
+    db: Session,
+    documento_id: int,
+    data: DocumentoUpdate,
+    usuario: Optional[Usuario] = None,
+) -> Documento:
     documento = get_documento_by_id(db, documento_id)
     if not documento:
-        raise ValueError("Documento não encontrado.")
-    for field, value in data.model_dump(exclude_unset=True).items():
+        raise ValueError("Documento n�o encontrado.")
+    payload = data.model_dump(exclude_unset=True)
+    comentario = payload.pop("comentario", None)
+    comentario = comentario.strip() if isinstance(comentario, str) else comentario
+    novo_status_raw = payload.pop("status", None)
+    status_anterior = (documento.status or "").lower()
+    novo_status: Optional[str] = None
+    if novo_status_raw is not None:
+        novo_status = novo_status_raw.value if hasattr(novo_status_raw, "value") else str(novo_status_raw)
+        payload["status"] = novo_status
+
+    comentario_obrigatorio = False
+    if novo_status:
+        status_normalizado = novo_status.lower()
+        status_changed = status_normalizado != status_anterior
+        if status_changed or status_normalizado == DocumentoStatus.rejeitado.value:
+            comentario_obrigatorio = True
+
+    if comentario_obrigatorio and not (comentario and comentario.strip()):
+        raise ValueError("Informe um coment�rio para registrar a mudan�a de status do documento.")
+
+    for field, value in payload.items():
         setattr(documento, field, value)
+
+    if novo_status or comentario:
+        status_value = documento.status
+        comentario_log = (comentario or "").strip()
+        if not comentario_log and novo_status:
+            comentario_log = "Status atualizado"
+        _registrar_documento_log(
+            db,
+            documento,
+            status_value,
+            comentario_log or None,
+            usuario=usuario,
+        )
     db.commit()
     db.refresh(documento)
     return documento
@@ -364,6 +526,104 @@ def delete_documento(db: Session, documento_id: int) -> None:
         raise ValueError("Documento não encontrado.")
     db.delete(documento)
     db.commit()
+
+
+def documentos_resumo(db: Session) -> dict:
+    rows = db.query(Documento.status, func.count(Documento.id)).group_by(Documento.status).all()
+    resumo = {"pendente": 0, "aprovado": 0, "rejeitado": 0}
+    for status_value, total in rows:
+        key = (status_value or "").lower()
+        if key in resumo:
+            resumo[key] = total
+    return resumo
+
+
+def documentos_analytics(db: Session, group_by: str, limit: int = 5) -> List[dict]:
+    status_lower = func.lower(Documento.status)
+    pendentes_expr = func.sum(
+        case((status_lower == DocumentoStatus.pendente.value, 1), else_=0)
+    ).label("pendentes")
+    aprovados_expr = func.sum(
+        case((status_lower == DocumentoStatus.aprovado.value, 1), else_=0)
+    ).label("aprovados")
+    rejeitados_expr = func.sum(
+        case((status_lower == DocumentoStatus.rejeitado.value, 1), else_=0)
+    ).label("rejeitados")
+
+    if group_by == "curso":
+        label_expr = func.coalesce(Curso.nome, "Sem curso vinculado")
+        key_expr = Curso.id
+        query = (
+            db.query(
+                key_expr.label("chave_id"),
+                label_expr.label("label"),
+                pendentes_expr,
+                aprovados_expr,
+                rejeitados_expr,
+            )
+            .join(Documento.contrato)
+            .join(Contrato.turma, isouter=True)
+            .join(Turma.curso, isouter=True)
+        )
+    elif group_by == "empresa":
+        label_expr = func.coalesce(Empresa.nome_fantasia, Empresa.razao_social, "Sem empresa vinculada")
+        key_expr = Empresa.id
+        query = (
+            db.query(
+                key_expr.label("chave_id"),
+                label_expr.label("label"),
+                pendentes_expr,
+                aprovados_expr,
+                rejeitados_expr,
+            )
+            .join(Documento.contrato)
+            .join(Contrato.convenio, isouter=True)
+            .join(Convenio.empresa, isouter=True)
+        )
+    elif group_by == "periodo":
+        label_expr = func.coalesce(
+            func.nullif(func.trim(Usuario.periodo), ""),
+            "Sem período informado",
+        )
+        key_expr = Usuario.periodo
+        query = (
+            db.query(
+                key_expr.label("chave_id"),
+                label_expr.label("label"),
+                pendentes_expr,
+                aprovados_expr,
+                rejeitados_expr,
+            )
+            .join(Documento.contrato)
+            .join(Contrato.aluno)
+        )
+    else:
+        raise ValueError("Parâmetro group_by inválido.")
+
+    resultado = (
+        query.group_by(key_expr, label_expr)
+        .order_by(pendentes_expr.desc(), aprovados_expr.desc())
+        .limit(limit)
+        .all()
+    )
+
+    itens: List[dict] = []
+    for row in resultado:
+        chave_val = row.chave_id
+        if chave_val is not None:
+            chave = str(chave_val)
+        else:
+            chave = None
+        itens.append(
+            {
+                "chave": chave,
+                "label": row.label or "Não informado",
+                "pendentes": int(row.pendentes or 0),
+                "aprovados": int(row.aprovados or 0),
+                "rejeitados": int(row.rejeitados or 0),
+            }
+        )
+    return itens
 
 
 def get_contrato_by_id(db: Session, contrato_id: int) -> Optional[Contrato]:

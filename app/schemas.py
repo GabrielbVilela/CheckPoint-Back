@@ -90,6 +90,16 @@ class EmpresaOut(EmpresaCreate):
         from_attributes = True
 
 
+class UsuarioUpdate(BaseModel):
+    nome: Optional[str] = None
+    matricula: Optional[str] = None
+    senha: Optional[str] = None
+    contato: Optional[str] = None
+    email: Optional[EmailStr] = None
+    turma: Optional[str] = None
+    periodo: Optional[str] = None
+
+
 class EmpresaUpdate(BaseModel):
     razao_social: Optional[str] = None
     nome_fantasia: Optional[str] = None
@@ -500,28 +510,104 @@ class DocumentoTipo(str, Enum):
     outro = "outro"
 
 
+def normalize_documento_tipo(value: Optional[Union[str, "DocumentoTipo"]]) -> Optional["DocumentoTipo"]:
+    if value is None or isinstance(value, DocumentoTipo):
+        return value
+    normalized = (
+        unicodedata.normalize("NFKD", value)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    mapping = {
+        "tce": DocumentoTipo.tce,
+        "termo_compromisso": DocumentoTipo.tce,
+        "termo_de_compromisso": DocumentoTipo.tce,
+        "plano_atividades": DocumentoTipo.plano_atividades,
+        "plano_de_atividades": DocumentoTipo.plano_atividades,
+        "plano_de_atividade": DocumentoTipo.plano_atividades,
+        "plano_de_atividades_do_estagio": DocumentoTipo.plano_atividades,
+        "plano_de_atividades_do_estagio_supervisionado": DocumentoTipo.plano_atividades,
+        "aditivo": DocumentoTipo.aditivo,
+        "aditivo_contrato": DocumentoTipo.aditivo,
+        "aditivo_de_contrato": DocumentoTipo.aditivo,
+        "outro": DocumentoTipo.outro,
+    }
+    return mapping.get(normalized, DocumentoTipo.outro)
+
+
+class DocumentoStatus(str, Enum):
+    pendente = "pendente"
+    aprovado = "aprovado"
+    rejeitado = "rejeitado"
+
+
 class DocumentoCreate(BaseModel):
     id_contrato: int
     tipo: DocumentoTipo
     arquivo_url: Optional[str] = None
     observacoes: Optional[str] = None
+    status: Optional[DocumentoStatus] = DocumentoStatus.pendente
+
+    @field_validator("tipo", mode="before")
+    @classmethod
+    def validate_tipo(cls, value):
+        normalized = normalize_documento_tipo(value)
+        if normalized is None:
+            raise ValueError("Tipo de documento invalido.")
+        return normalized
 
 
 class DocumentoUpdate(BaseModel):
     tipo: Optional[DocumentoTipo] = None
     arquivo_url: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[DocumentoStatus] = None
     observacoes: Optional[str] = None
+    comentario: Optional[str] = None
+
+    @field_validator("tipo", mode="before")
+    @classmethod
+    def validate_tipo(cls, value):
+        return normalize_documento_tipo(value)
+
+
+class DocumentoLogOut(BaseModel):
+    id: int
+    status: DocumentoStatus
+    comentario: Optional[str] = None
+    usuario: Optional[UsuarioOut] = None
+    criado_em: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class DocumentoOut(DocumentoCreate):
     id: int
-    status: str
+    status: DocumentoStatus
     criado_em: datetime
     atualizado_em: datetime
+    logs: List[DocumentoLogOut] = []
 
     class Config:
         from_attributes = True
+
+    @field_validator("tipo", mode="before")
+    @classmethod
+    def validate_tipo(cls, value):
+        normalized = normalize_documento_tipo(value)
+        if normalized is None:
+            raise ValueError("Tipo de documento invalido.")
+        return normalized
+
+
+class DocumentoResumoOut(BaseModel):
+    pendentes: int
+    aprovados: int
+    rejeitados: int
 
 
 class DocumentoUploadIn(BaseModel):
@@ -531,6 +617,26 @@ class DocumentoUploadIn(BaseModel):
 
 class DocumentoUploadOut(BaseModel):
     url: str
+
+
+class DocumentoAnalyticsGroup(str, Enum):
+    curso = "curso"
+    empresa = "empresa"
+    periodo = "periodo"
+
+
+class DocumentoAnalyticsItem(BaseModel):
+    chave: Optional[str] = None
+    label: str
+    pendentes: int
+    aprovados: int
+    rejeitados: int
+
+
+class DocumentoExportInlineOut(BaseModel):
+    filename: str
+    mime_type: str
+    content_base64: str
 
 
 class AlunoImportRequest(BaseModel):

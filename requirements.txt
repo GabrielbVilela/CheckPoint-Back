@@ -10,3 +10,4 @@ pydantic[email]
 requests
 python-jose[cryptography]
 python-multipart
+reportlab
