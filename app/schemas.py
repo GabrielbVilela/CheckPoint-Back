@@ -17,13 +17,13 @@ class TipoUsuario(str, Enum):
 
 
 class UsuarioCreate(BaseModel):
-    nome: str
-    matricula: str
-    senha: str
-    contato: str
+    nome: str = Field(..., min_length=2, max_length=255)
+    matricula: str = Field(..., min_length=3, max_length=50)
+    senha: str = Field(..., min_length=8, max_length=128)
+    contato: str = Field(..., min_length=6, max_length=50)
     email: EmailStr
-    turma: str
-    periodo: Optional[str] = None
+    turma: str = Field(..., max_length=50)
+    periodo: Optional[str] = Field(default=None, max_length=30)
     tipo_acesso: Literal["aluno", "professor", "admin", "coordenador", "supervisor"] = "aluno"
 
 
@@ -44,9 +44,9 @@ class UsuarioOut(BaseModel):
 # Cursos e Turmas
 # ------------------------------------------------------------
 class CursoCreate(BaseModel):
-    nome: str
+    nome: str = Field(..., max_length=255)
     carga_horaria_total: Optional[int] = None
-    competencias: Optional[str] = None
+    competencias: Optional[str] = Field(default=None, max_length=2000)
 
 
 class CursoOut(CursoCreate):
@@ -57,7 +57,7 @@ class CursoOut(CursoCreate):
 
 
 class TurmaCreate(BaseModel):
-    nome: str
+    nome: str = Field(..., max_length=255)
     ano: Optional[int] = None
     semestre: Optional[int] = None
     turno: Optional[str] = None
@@ -76,10 +76,10 @@ class TurmaOut(TurmaCreate):
 # Empresas e Supervisores
 # ------------------------------------------------------------
 class EmpresaCreate(BaseModel):
-    razao_social: str
-    nome_fantasia: Optional[str] = None
-    cnpj: Optional[str] = None
-    telefone: Optional[str] = None
+    razao_social: str = Field(..., max_length=255)
+    nome_fantasia: Optional[str] = Field(default=None, max_length=255)
+    cnpj: Optional[str] = Field(default=None, max_length=20)
+    telefone: Optional[str] = Field(default=None, max_length=30)
     email: Optional[EmailStr] = None
 
 
@@ -91,28 +91,28 @@ class EmpresaOut(EmpresaCreate):
 
 
 class UsuarioUpdate(BaseModel):
-    nome: Optional[str] = None
-    matricula: Optional[str] = None
-    senha: Optional[str] = None
-    contato: Optional[str] = None
+    nome: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    matricula: Optional[str] = Field(default=None, min_length=3, max_length=50)
+    senha: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    contato: Optional[str] = Field(default=None, min_length=6, max_length=50)
     email: Optional[EmailStr] = None
-    turma: Optional[str] = None
-    periodo: Optional[str] = None
+    turma: Optional[str] = Field(default=None, max_length=50)
+    periodo: Optional[str] = Field(default=None, max_length=30)
 
 
 class EmpresaUpdate(BaseModel):
-    razao_social: Optional[str] = None
-    nome_fantasia: Optional[str] = None
-    cnpj: Optional[str] = None
-    telefone: Optional[str] = None
+    razao_social: Optional[str] = Field(default=None, max_length=255)
+    nome_fantasia: Optional[str] = Field(default=None, max_length=255)
+    cnpj: Optional[str] = Field(default=None, max_length=20)
+    telefone: Optional[str] = Field(default=None, max_length=30)
     email: Optional[EmailStr] = None
 
 
 class SupervisorExternoCreate(BaseModel):
-    nome: str
+    nome: str = Field(..., max_length=255)
     email: Optional[EmailStr] = None
-    telefone: Optional[str] = None
-    cargo: Optional[str] = None
+    telefone: Optional[str] = Field(default=None, max_length=30)
+    cargo: Optional[str] = Field(default=None, max_length=120)
     id_empresa: int
 
 
@@ -125,10 +125,10 @@ class SupervisorExternoOut(SupervisorExternoCreate):
 
 
 class SupervisorExternoUpdate(BaseModel):
-    nome: Optional[str] = None
+    nome: Optional[str] = Field(default=None, max_length=255)
     email: Optional[EmailStr] = None
-    telefone: Optional[str] = None
-    cargo: Optional[str] = None
+    telefone: Optional[str] = Field(default=None, max_length=30)
+    cargo: Optional[str] = Field(default=None, max_length=120)
     id_empresa: Optional[int] = None
 
 
@@ -141,7 +141,7 @@ class ConvenioCreate(BaseModel):
     data_inicio: Optional[date] = None
     data_fim: Optional[date] = None
     status: Optional[bool] = True
-    descricao: Optional[str] = None
+    descricao: Optional[str] = Field(default=None, max_length=500)
 
 
 class ConvenioOut(ConvenioCreate):
@@ -173,12 +173,12 @@ class JustificativaStatus(str, Enum):
 
 
 class JustificativaBase(BaseModel):
-    tipo: str
-    motivo: str
+    tipo: str = Field(..., max_length=50)
+    motivo: str = Field(..., max_length=2000)
     id_contrato: int
     id_ponto: Optional[int] = None
     data_referencia: Optional[date] = None
-    evidencia_url: Optional[str] = None
+    evidencia_url: Optional[str] = Field(default=None, max_length=255)
 
 
 class JustificativaCreate(JustificativaBase):
@@ -187,7 +187,7 @@ class JustificativaCreate(JustificativaBase):
 
 class JustificativaStatusUpdate(BaseModel):
     status: Literal["aprovado", "rejeitado"]
-    comentario: Optional[str] = None
+    comentario: Optional[str] = Field(default=None, max_length=500)
 
 
 class JustificativaLogOut(BaseModel):
@@ -225,14 +225,14 @@ class DiarioStatus(str, Enum):
 class DiarioAtividadeCreate(BaseModel):
     id_contrato: int
     data_referencia: date
-    resumo: str
-    detalhes: Optional[str] = None
-    anexo_url: Optional[str] = None
+    resumo: str = Field(..., max_length=255)
+    detalhes: Optional[str] = Field(default=None, max_length=5000)
+    anexo_url: Optional[str] = Field(default=None, max_length=255)
 
 
 class DiarioAtividadeStatusUpdate(BaseModel):
     status: Literal["aprovado", "rejeitado"]
-    comentario: Optional[str] = None
+    comentario: Optional[str] = Field(default=None, max_length=500)
 
 
 class DiarioAtividadeOut(BaseModel):
@@ -256,9 +256,9 @@ class DiarioAtividadeOut(BaseModel):
 # AvaliaÃ§Ãµes
 # ------------------------------------------------------------
 class AvaliacaoRubricaCreate(BaseModel):
-    nome: str
-    descricao: Optional[str] = None
-    criterios: Optional[str] = None  # JSON string com pesos/descriÃ§Ãµes
+    nome: str = Field(..., max_length=255)
+    descricao: Optional[str] = Field(default=None, max_length=2000)
+    criterios: Optional[str] = Field(default=None, max_length=5000)  # JSON string com pesos/descrições
 
 
 class AvaliacaoRubricaOut(AvaliacaoRubricaCreate):
@@ -326,12 +326,12 @@ class AvaliacaoOut(AvaliacaoCreate):
 # EndereÃ§os
 # ------------------------------------------------------------
 class EnderecoCreate(BaseModel):
-    cep: Optional[str] = None
-    logradouro: str
-    cidade: str
-    estado: str
-    numero: Optional[str] = None
-    bairro: Optional[str] = None
+    cep: Optional[str] = Field(default=None, max_length=15)
+    logradouro: str = Field(..., max_length=255)
+    cidade: str = Field(..., max_length=120)
+    estado: str = Field(..., max_length=10)
+    numero: Optional[str] = Field(default=None, max_length=30)
+    bairro: Optional[str] = Field(default=None, max_length=120)
 
 
 class EnderecoOut(EnderecoCreate):
@@ -439,20 +439,36 @@ class ContratoOut(BaseModel):
 # ------------------------------------------------------------
 class PontoLocalizacaoIn(BaseModel):
     """Payload de entrada do cliente: apenas a localizaÃ§Ã£o atual."""
-    latitude_atual: float = Field(validation_alias=AliasChoices("latitude_atual", "latitudeAtual"))
-    longitude_atual: float = Field(validation_alias=AliasChoices("longitude_atual", "longitudeAtual"))
+    latitude_atual: float = Field(
+        validation_alias=AliasChoices("latitude_atual", "latitudeAtual"),
+        ge=-90,
+        le=90,
+    )
+    longitude_atual: float = Field(
+        validation_alias=AliasChoices("longitude_atual", "longitudeAtual"),
+        ge=-180,
+        le=180,
+    )
     precisao_metros: Optional[float] = Field(
-        default=None, validation_alias=AliasChoices("precisao_metros", "precisaoMetros")
+        default=None, validation_alias=AliasChoices("precisao_metros", "precisaoMetros"), ge=0
     )
 
 
 class PontoCheckLocation(BaseModel):
     """Payload interno: inclui id_aluno + localizaÃ§Ã£o (compat com legado)."""
     id_aluno: int = Field(validation_alias=AliasChoices("id_aluno", "idAluno"))
-    latitude_atual: float = Field(validation_alias=AliasChoices("latitude_atual", "latitudeAtual"))
-    longitude_atual: float = Field(validation_alias=AliasChoices("longitude_atual", "longitudeAtual"))
+    latitude_atual: float = Field(
+        validation_alias=AliasChoices("latitude_atual", "latitudeAtual"),
+        ge=-90,
+        le=90,
+    )
+    longitude_atual: float = Field(
+        validation_alias=AliasChoices("longitude_atual", "longitudeAtual"),
+        ge=-180,
+        le=180,
+    )
     precisao_metros: Optional[float] = Field(
-        default=None, validation_alias=AliasChoices("precisao_metros", "precisaoMetros")
+        default=None, validation_alias=AliasChoices("precisao_metros", "precisaoMetros"), ge=0
     )
 
 
@@ -548,8 +564,8 @@ class DocumentoStatus(str, Enum):
 class DocumentoCreate(BaseModel):
     id_contrato: int
     tipo: DocumentoTipo
-    arquivo_url: Optional[str] = None
-    observacoes: Optional[str] = None
+    arquivo_url: Optional[str] = Field(default=None, max_length=255)
+    observacoes: Optional[str] = Field(default=None, max_length=2000)
     status: Optional[DocumentoStatus] = DocumentoStatus.pendente
 
     @field_validator("tipo", mode="before")
@@ -563,10 +579,10 @@ class DocumentoCreate(BaseModel):
 
 class DocumentoUpdate(BaseModel):
     tipo: Optional[DocumentoTipo] = None
-    arquivo_url: Optional[str] = None
+    arquivo_url: Optional[str] = Field(default=None, max_length=255)
     status: Optional[DocumentoStatus] = None
-    observacoes: Optional[str] = None
-    comentario: Optional[str] = None
+    observacoes: Optional[str] = Field(default=None, max_length=2000)
+    comentario: Optional[str] = Field(default=None, max_length=1000)
 
     @field_validator("tipo", mode="before")
     @classmethod
@@ -611,7 +627,7 @@ class DocumentoResumoOut(BaseModel):
 
 
 class DocumentoUploadIn(BaseModel):
-    filename: str
+    filename: str = Field(..., max_length=255)
     content_base64: str
 
 
@@ -653,19 +669,19 @@ class AlunoImportResponse(BaseModel):
 # Cadastro Agregado de Aluno
 # ------------------------------------------------------------
 class AlunoCadastroIn(BaseModel):
-    nome: str
-    matricula: str
-    senha: Optional[str] = None
-    celular: str
+    nome: str = Field(..., min_length=2, max_length=255)
+    matricula: str = Field(..., min_length=3, max_length=50)
+    senha: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    celular: str = Field(..., min_length=6, max_length=50)
     email: EmailStr
-    turma: str
-    periodo: Optional[str] = None
-    cep: Optional[str] = None
-    logradouro: str
-    numero: Optional[str] = None
-    bairro: Optional[str] = None
-    cidade: str
-    estado: str
+    turma: str = Field(..., max_length=50)
+    periodo: Optional[str] = Field(default=None, max_length=30)
+    cep: Optional[str] = Field(default=None, max_length=15)
+    logradouro: str = Field(..., max_length=255)
+    numero: Optional[str] = Field(default=None, max_length=30)
+    bairro: Optional[str] = Field(default=None, max_length=120)
+    cidade: str = Field(..., max_length=120)
+    estado: str = Field(..., max_length=10)
     data_inicio: Optional[date] = Field(default=None, validation_alias=AliasChoices("data_inicio", "dataInicio"))
     data_final: Optional[date] = Field(default=None, validation_alias=AliasChoices("data_final", "dataFim"))
     id_professor: Optional[int] = Field(default=None, validation_alias=AliasChoices("id_professor", "idProfessor"))

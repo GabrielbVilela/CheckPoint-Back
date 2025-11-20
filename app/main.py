@@ -3,20 +3,27 @@ import csv
 import io
 import os
 import uuid
+import time
+import mimetypes
+import logging
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import date, timedelta, datetime
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+try:
+    import redis
+except ImportError:  # pragma: no cover
+    redis = None
 
 # --- Imports locais ---
 from . import crud, schemas, models, auth
@@ -45,7 +52,6 @@ from .schemas import (
     DocumentoStatus,
 )
 from .permissions import require_roles
-from fastapi import Response
 
 # -----------------------------------------------------------------------------
 # Lifespan da Aplicação
@@ -97,9 +103,6 @@ async def lifespan(app: FastAPI):
     print("INFO: Encerrando aplicação.")
 
 app = FastAPI(lifespan=lifespan, title="API de Gestão de Estágios", version="1.3.0")
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-app.mount(f"/{UPLOAD_DIR}", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 USER_MANAGEMENT_ROLES = (
     TipoUsuario.professor.value,
@@ -152,17 +155,144 @@ AVALIACAO_VIEW_ROLES = (
     TipoUsuario.aluno.value,
 )
 
+ROLE_CREATION_MATRIX = {
+    TipoUsuario.admin.value: {
+        TipoUsuario.admin.value,
+        TipoUsuario.coordenador.value,
+        TipoUsuario.professor.value,
+        TipoUsuario.supervisor.value,
+        TipoUsuario.aluno.value,
+    },
+    TipoUsuario.coordenador.value: {
+        TipoUsuario.professor.value,
+        TipoUsuario.supervisor.value,
+        TipoUsuario.aluno.value,
+    },
+    TipoUsuario.professor.value: {TipoUsuario.aluno.value},
+}
+
+
+def ensure_role_creation_allowed(requested_role: str, creator: models.Usuario) -> None:
+    allowed_roles = ROLE_CREATION_MATRIX.get(creator.tipo_acesso, set())
+    if requested_role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perfil informado não é permitido para o seu nível de acesso.",
+        )
+
+
+SECURITY_LOGGER = logging.getLogger("security")
+logging.basicConfig(level=logging.INFO)
+
+# Upload config
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+UPLOAD_MAX_BYTES = int(os.getenv("UPLOAD_MAX_BYTES", 10 * 1024 * 1024))  # padrão 10MB
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".doc",
+    ".docx",
+}
+
+# Redis opcional para bloqueio de login
+REDIS_URL = os.getenv("REDIS_URL")
+REDIS_PREFIX = "cp_login"
+if not REDIS_URL:
+    raise RuntimeError("REDIS_URL é obrigatório para controle de tentativas de login.")
+if not redis:
+    raise RuntimeError("Biblioteca redis não instalada; instale requirements.")
+redis_client = redis.Redis.from_url(REDIS_URL)
+redis_client.ping()
+SECURITY_LOGGER.info("Redis habilitado para controle de tentativas de login.")
 
 # -----------------------------------------------------------------------------
 # CORS
 # -----------------------------------------------------------------------------
+allowed_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()] or [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+    max_age=86400,
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
+
+# -----------------------------------------------------------------------------
+# Controles de autenticação
+# -----------------------------------------------------------------------------
+FAILED_LOGIN_ATTEMPTS: Dict[str, deque] = defaultdict(deque)
+LOCKED_UNTIL: Dict[str, float] = {}
+LOGIN_FAIL_WINDOW_SEC = int(os.getenv("LOGIN_FAIL_WINDOW_SEC", 900))  # 15 minutos
+LOGIN_FAIL_LIMIT = 5  # Limite fixo de 5 tentativas
+LOGIN_LOCK_TIME_SEC = int(os.getenv("LOGIN_LOCK_TIME_SEC", 900))  # 15 minutos
+
+
+def _cleanup_attempts(identifier: str, now: float) -> deque:
+    attempts = FAILED_LOGIN_ATTEMPTS[identifier]
+    cutoff = now - LOGIN_FAIL_WINDOW_SEC
+    while attempts and attempts[0] < cutoff:
+        attempts.popleft()
+    return attempts
+
+
+def _register_failed_login(identifier: str) -> int:
+    now = time.time()
+    if redis_client:
+        attempts_key = f"{REDIS_PREFIX}:attempts:{identifier}"
+        lock_key = f"{REDIS_PREFIX}:lock:{identifier}"
+        attempts = int(redis_client.incr(attempts_key))
+        redis_client.expire(attempts_key, LOGIN_FAIL_WINDOW_SEC)
+        if attempts >= LOGIN_FAIL_LIMIT:
+            redis_client.setex(lock_key, LOGIN_LOCK_TIME_SEC, "1")
+        return attempts
+
+    attempts = _cleanup_attempts(identifier, now)
+    attempts.append(now)
+    if len(attempts) >= LOGIN_FAIL_LIMIT:
+        LOCKED_UNTIL[identifier] = now + LOGIN_LOCK_TIME_SEC
+    return len(attempts)
+
+
+def _clear_login_state(identifier: str) -> None:
+    if redis_client:
+        redis_client.delete(f"{REDIS_PREFIX}:attempts:{identifier}")
+        redis_client.delete(f"{REDIS_PREFIX}:lock:{identifier}")
+        return
+    FAILED_LOGIN_ATTEMPTS.pop(identifier, None)
+    LOCKED_UNTIL.pop(identifier, None)
+
+
+def _is_locked(identifier: str) -> Optional[int]:
+    now = time.time()
+    if redis_client:
+        lock_key = f"{REDIS_PREFIX}:lock:{identifier}"
+        ttl = redis_client.ttl(lock_key)
+        if ttl and ttl > 0:
+            return ttl
+        return None
+    locked_until = LOCKED_UNTIL.get(identifier)
+    if locked_until and locked_until > now:
+        return int(locked_until - now)
+    return None
+
 
 # -----------------------------------------------------------------------------
 # Dependencia de sessao do Banco
@@ -180,16 +310,43 @@ def health_check():
 # -----------------------------------------------------------------------------
 @app.post("/login", response_model=schemas.Token, tags=["Autenticação"])
 def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    forwarded_ip = forwarded_for.split(",")[0].strip() if forwarded_for else None
+    client_ip = forwarded_ip or (request.client.host if request.client else "unknown")
+    candidate_user = crud.get_usuario_by_matricula(db, matricula=form_data.username)
+    identifier = (
+        f"{client_ip}:uid:{candidate_user.id}"
+        if candidate_user
+        else f"{client_ip}:user:{form_data.username}"
+    )
+    lock_ttl = _is_locked(identifier)
+    if lock_ttl:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Muitas tentativas de login. Tente novamente em alguns minutos.",
+            headers={"Retry-After": str(lock_ttl)},
+        )
+
     user = auth.authenticate_user(db, matricula=form_data.username, password=form_data.password)
     if not user:
+        attempts = _register_failed_login(identifier)
+        if attempts > 1:
+            time.sleep(min(attempts, 3))  # pequeno atraso progressivo
+        headers = {"WWW-Authenticate": "Bearer"}
+        lock_ttl = _is_locked(identifier)
+        if lock_ttl:
+            headers["Retry-After"] = str(lock_ttl)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Matrícula ou senha inválida",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers=headers,
         )
+
+    _clear_login_state(identifier)
 
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token_payload = {
@@ -222,17 +379,20 @@ def create_user_as_admin(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(require_roles(*USER_MANAGEMENT_ROLES)),
 ):
+    ensure_role_creation_allowed(usuario.tipo_acesso, current_user)
+
+    duplicate_message = "Não foi possível criar usuário com os dados fornecidos."
     if crud.get_usuario_by_email(db, email=usuario.email):
-        raise HTTPException(status_code=400, detail="E-mail já cadastrado")
+        raise HTTPException(status_code=400, detail=duplicate_message)
     if crud.get_usuario_by_matricula(db, matricula=usuario.matricula):
-        raise HTTPException(status_code=400, detail="Matrícula já cadastrada")
+        raise HTTPException(status_code=400, detail=duplicate_message)
     if crud.get_usuario_by_contato(db, contato=usuario.contato):
-        raise HTTPException(status_code=400, detail="Número de telefone já cadastrado")
+        raise HTTPException(status_code=400, detail=duplicate_message)
 
     try:
         return crud.create_usuario(db=db, usuario=usuario)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Não foi possível criar usuário.")
 
 @app.get("/utilizadores", response_model=List[schemas.UsuarioOut], tags=["Gestão de Utilizadores"])
 def list_users(
@@ -366,19 +526,35 @@ def upload_documento_arquivo(
     db: Session = Depends(get_db),
     current_user: models.Usuario = Depends(require_roles(*ACADEMIC_WRITE_ROLES)),
 ):
+    # Validações básicas de segurança
     if not payload.filename or not payload.content_base64:
         raise HTTPException(status_code=400, detail="Arquivo inválido.")
+
+    # Verifica extensão permitida
+    safe_name = Path(payload.filename).name or "arquivo.bin"
+    ext = Path(safe_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Extensão de arquivo não permitida.")
+
+    # Estimativa do tamanho antes de decodificar (base64 aumenta ~33%)
+    estimated_bytes = len(payload.content_base64) * 3 // 4
+    if estimated_bytes > UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Arquivo excede o tamanho máximo permitido.")
+
     try:
         data = base64.b64decode(payload.content_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="Não foi possível decodificar o arquivo.")
-    safe_name = Path(payload.filename).name or "arquivo.bin"
+
+    if len(data) > UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Arquivo excede o tamanho máximo permitido.")
+
     final_name = f"{uuid.uuid4().hex}_{safe_name}"
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     file_path = Path(UPLOAD_DIR) / final_name
     with open(file_path, "wb") as f:
         f.write(data)
-    return DocumentoUploadOut(url=f"/{UPLOAD_DIR}/{final_name}")
+    return DocumentoUploadOut(url=f"/documentos/download/{final_name}")
 
 
 @app.delete(
@@ -432,6 +608,32 @@ def list_supervisores_externos_endpoint(
         return crud.list_supervisores_externos(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/documentos/download/{filename}",
+    response_class=StreamingResponse,
+    tags=["Documentos"],
+)
+def download_documento(
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: models.Usuario = Depends(require_roles(*ACADEMIC_VIEW_ROLES)),
+):
+    base_path = Path(UPLOAD_DIR).resolve()
+    target_path = (base_path / filename).resolve()
+    if not str(target_path).startswith(str(base_path)):
+        raise HTTPException(status_code=400, detail="Caminho de arquivo inválido.")
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    mime_type, _ = mimetypes.guess_type(str(target_path))
+    mime_type = mime_type or "application/octet-stream"
+    return StreamingResponse(
+        target_path.open("rb"),
+        media_type=mime_type,
+        headers={"Content-Disposition": f'attachment; filename=\"{target_path.name}\"'},
+    )
 
 
 @app.patch(
@@ -1350,18 +1552,31 @@ def obter_timeline_ponto(
 # -----------------------------------------------------------------------------
 # Handler para detalhar 422 (debug)
 # -----------------------------------------------------------------------------
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    SECURITY_LOGGER.error("Erro não tratado em %s: %s", request.url.path, exc, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Erro interno. Tente novamente mais tarde."},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code >= 500:
+        SECURITY_LOGGER.error("Erro HTTP interno em %s: %s", request.url.path, exc.detail)
+        return JSONResponse(status_code=exc.status_code, content={"detail": "Erro interno"})
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
     """
-    Mostra o detalhe dos erros 422 e o body recebido (facilita debug no Cloud Run).
-    Remova em produção se preferir respostas mais limpas.
+    Handler de 422 que evita incluir o corpo da requisição na resposta.
     """
     return JSONResponse(
         status_code=422,
-        content={
-            "detail": exc.errors(),
-            "body": (await request.body()).decode()
-        },
+        content={"detail": exc.errors()},
     )
 
 

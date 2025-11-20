@@ -21,7 +21,7 @@ def get_coordinates_from_google(address: str):
     }
 
     try:
-        response = requests.get(base_url, params=params)
+        response = requests.get(base_url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 

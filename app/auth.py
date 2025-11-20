@@ -12,10 +12,16 @@ from .database import get_db
 from .schemas import TipoUsuario
 from .security import verify_password
 
-# ConfiguraÃ§Ã£o de SeguranÃ§a
-SECRET_KEY = os.getenv("SECRET_KEY", "uma_chave_secreta_muito_longa_e_aleatoria")
+# Configuração de Segurança
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is required for token signing.")
+
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# Hash fixo usado para equilibrar tempo de resposta em autenticação falha
+DUMMY_PASSWORD_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO57apqAIWNUP8NO7P3R8qRzu2Jp2uH5e"
 
 # Esquema de AutenticaÃ§Ã£o OAuth2
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -34,9 +40,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 def authenticate_user(db: Session, matricula: str, password: str) -> Optional[models.Usuario]:
-    """Autentica um utilizador pela matrÃ­cula e senha."""
+    """Autentica um utilizador pela matrícula e mitiga enumeração por tempo."""
     user = crud.get_usuario_by_matricula(db, matricula=matricula)
-    if not user or not verify_password(password, user.senha_hash):
+
+    # Sempre verifica um hash (real ou dummy) para diminuir diferença de tempo
+    hash_to_check = user.senha_hash if user else DUMMY_PASSWORD_HASH
+    if not verify_password(password, hash_to_check):
+        return None
+
+    if not user:
         return None
     return user
 

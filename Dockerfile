@@ -6,6 +6,10 @@ WORKDIR /app
 
 # Diz ao Python para sempre procurar módulos a partir da pasta /app
 ENV PYTHONPATH=/app
+ENV PORT=8080
+
+# Cria usuário não privilegiado
+RUN addgroup --system app && adduser --system --ingroup app app
 
 # Copia o arquivo de dependências
 COPY requirements.txt .
@@ -16,5 +20,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia todo o resto do seu projeto para o diretório de trabalho
 COPY . .
 
-# Comando para iniciar a aplicação
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Ajusta permissões e troca usuário
+RUN chown -R app:app /app
+USER app
+
+# Comando para iniciar a aplicação (sem shell para evitar injection)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}"]
