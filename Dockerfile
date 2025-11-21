@@ -25,4 +25,5 @@ RUN chown -R app:app /app
 USER app
 
 # Comando para iniciar a aplicação (sem shell para evitar injection)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+

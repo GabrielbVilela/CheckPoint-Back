@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,8 @@ try:
     import redis
 except ImportError:  # pragma: no cover
     redis = None
+
+load_dotenv()
 
 # --- Imports locais ---
 from . import crud, schemas, models, auth
@@ -200,13 +202,18 @@ ALLOWED_UPLOAD_EXTENSIONS = {
 # Redis opcional para bloqueio de login
 REDIS_URL = os.getenv("REDIS_URL")
 REDIS_PREFIX = "cp_login"
-if not REDIS_URL:
-    raise RuntimeError("REDIS_URL é obrigatório para controle de tentativas de login.")
-if not redis:
-    raise RuntimeError("Biblioteca redis não instalada; instale requirements.")
-redis_client = redis.Redis.from_url(REDIS_URL)
-redis_client.ping()
-SECURITY_LOGGER.info("Redis habilitado para controle de tentativas de login.")
+redis_client = None
+if REDIS_URL:
+    if not redis:
+        raise RuntimeError("Biblioteca redis não instalada; instale requirements.")
+    try:
+        redis_client = redis.Redis.from_url(REDIS_URL)
+        redis_client.ping()
+        SECURITY_LOGGER.info("Redis habilitado para controle de tentativas de login.")
+    except Exception as exc:
+        SECURITY_LOGGER.warning("Falha ao conectar ao Redis; usando controle em memória: %s", exc)
+else:
+    SECURITY_LOGGER.warning("REDIS_URL não definido; controle de login ficará em memória.")
 
 # -----------------------------------------------------------------------------
 # CORS

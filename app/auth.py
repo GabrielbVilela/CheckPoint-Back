@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -11,6 +12,8 @@ from . import crud, models, schemas
 from .database import get_db
 from .schemas import TipoUsuario
 from .security import verify_password
+
+load_dotenv()
 
 # Configuração de Segurança
 SECRET_KEY = os.getenv("SECRET_KEY")
